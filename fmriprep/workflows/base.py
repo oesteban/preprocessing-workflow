@@ -82,9 +82,6 @@ def wf_ds054_type(subject_data, settings, name='fMRI_prep'):
     # EPI to SBRef
     epi2sbref = epi_sbref_registration(settings)
 
-    # EPI unwarp
-    epiunwarp_wf = epi_unwarp(settings=settings)
-
     # get confounds
     confounds_wf = confounds.discover_wf(settings)
     confounds_wf.get_node('inputnode').inputs.t1_transform_flags = [False, True]
@@ -96,9 +93,6 @@ def wf_ds054_type(subject_data, settings, name='fMRI_prep'):
         (bidssrc, t1w_pre, [('t1w', 'inputnode.t1w')]),
         (bidssrc, sbref_pre, [('sbref', 'inputnode.sbref')]),
         (bidssrc, sbref_t1, [('sbref', 'inputnode.sbref')]),
-        (fmap_est, sbref_pre, [('outputnode.fmap', 'inputnode.fmap'),
-                               ('outputnode.fmap_ref', 'inputnode.fmap_ref'),
-                               ('outputnode.fmap_mask', 'inputnode.fmap_mask')]),
         (sbref_pre, sbref_t1, [('outputnode.sbref_unwarped', 'inputnode.sbref_brain')]),
         (t1w_pre, sbref_t1, [
             ('outputnode.t1_brain', 'inputnode.t1_brain'),
@@ -108,11 +102,6 @@ def wf_ds054_type(subject_data, settings, name='fMRI_prep'):
         (hmcwf, epi2sbref, [('outputnode.epi_brain', 'inputnode.epi_brain')]),
         (hmcwf, epi2sbref, [('outputnode.epi_mean', 'inputnode.epi_mean')]),
         (hmcwf, epi2sbref, [('inputnode.epi', 'inputnode.epi')]),
-        (hmcwf, epiunwarp_wf, [('inputnode.epi', 'inputnode.epi')]),
-        (fmap_est, epiunwarp_wf, [('outputnode.fmap', 'inputnode.fmap'),
-                                  ('outputnode.fmap_mask', 'inputnode.fmap_mask'),
-                                  ('outputnode.fmap_ref', 'inputnode.fmap_ref')]),
-
         (sbref_t1, t1_to_epi_transforms, [(('outputnode.mat_t1_to_sbr'), 'in_file')]),
         (epi2sbref, t1_to_epi_transforms, [('outputnode.out_mat_inv', 'in_file2')]),
 
@@ -123,10 +112,28 @@ def wf_ds054_type(subject_data, settings, name='fMRI_prep'):
                                ('outputnode.motion_confounds_file',
                                 'inputnode.motion_confounds_file'),
                                ('inputnode.epi', 'inputnode.source_file')]),
-        (epiunwarp_wf, confounds_wf, [('outputnode.epi_mask', 'inputnode.epi_mask'),
-                                      ('outputnode.epi_unwarp', 'inputnode.fmri_file')]),
         (t1w_pre, confounds_wf, [('outputnode.t1_seg', 'inputnode.t1_seg')]),
     ])
+
+
+    if fmap_est is not None:
+        # EPI unwarp
+        epiunwarp_wf = epi_unwarp(settings=settings)
+
+        workflow.connect([
+            (fmap_est, sbref_pre, [('outputnode.fmap', 'inputnode.fmap'),
+                                   ('outputnode.fmap_ref', 'inputnode.fmap_ref'),
+                                   ('outputnode.fmap_mask', 'inputnode.fmap_mask')]),
+            (fmap_est, epiunwarp_wf, [('outputnode.fmap', 'inputnode.fmap'),
+                                      ('outputnode.fmap_mask', 'inputnode.fmap_mask'),
+                                      ('outputnode.fmap_ref', 'inputnode.fmap_ref')]),
+            (hmcwf, epiunwarp_wf, [('inputnode.epi', 'inputnode.epi')]),
+            (epiunwarp_wf, confounds_wf, [('outputnode.epi_mask', 'inputnode.epi_mask'),
+                                          ('outputnode.epi_unwarp', 'inputnode.fmri_file')]),
+        ])
+    else:
+        raise NotImplementedError
+
     return workflow
 
 

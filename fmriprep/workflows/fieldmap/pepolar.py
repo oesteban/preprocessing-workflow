@@ -43,9 +43,9 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
 
     Outputs::
 
-      outputnode.mag_brain - The average magnitude image, skull-stripped
+      outputnode.fmap_ref - The average magnitude image, skull-stripped
       outputnode.fmap_mask - The brain mask applied to the fieldmap
-      outputnode.fieldmap - The estimated fieldmap in Hz
+      outputnode.fmap - The estimated fieldmap in Hz
 
     """
 
@@ -55,7 +55,7 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     workflow = pe.Workflow(name=name)
     inputnode = pe.Node(niu.IdentityInterface(fields=['input_images']), name='inputnode')
     outputnode = pe.Node(niu.IdentityInterface(
-        fields=['fieldmap', 'fmap_mask', 'mag_brain']), name='outputnode')
+        fields=['fmap', 'fmap_mask', 'fmap_ref']), name='outputnode')
 
     # Read metadata
     meta = pe.MapNode(ReadSidecarJSON(fields=['TotalReadoutTime', 'PhaseEncodingDirection']),
@@ -100,8 +100,8 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
         (unwarp_mag, inu_n4, [('out_corrected', 'input_image')]),
         (inu_n4, mag_bet, [('output_image', 'in_file')]),
 
-        (topup, outputnode, [('out_field', 'fieldmap')]),
-        (mag_bet, outputnode, [('out_file', 'mag_brain'),
+        (topup, outputnode, [('out_field', 'fmap')]),
+        (mag_bet, outputnode, [('out_file', 'fmap_ref'),
                                ('mask_file', 'fmap_mask')])
     ])
 
