@@ -24,8 +24,7 @@ SDC_UNWARP_NAME = 'SDC_unwarp'
 
 def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
     """
-    This workflow takes an estimated fieldmap (in Hz) and a target image to be
-    corrected. For correction, it applies TOPUP,
+    This workflow takes an estimated fieldmap and a target image and applies TOPUP,
     an :abbr:`SDC (susceptibility-derived distortion correction)` method in FSL to
     unwarp the target image.
 
@@ -37,7 +36,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
       inputnode.fmap_ref - the fieldmap reference (generally, a *magnitude* image or the
                            resulting SE image)
       inputnode.fmap_mask - a brain mask in fieldmap-space
-      inputnode.fmap - a fieldmap in Hz (again: this is a fieldmap in Hertzs)
+      inputnode.fmap - a fieldmap in Hz
       inputnode.hmc_movpar - the head motion parameters (iff inputnode.in_file is only
                              one 4D file)
 
@@ -71,6 +70,10 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
 
     fslsplit = pe.Node(fsl.Split(dimension='t'), name='ImageHMCSplit')
 
+
+    mskfix = pe.Node(fsl.ApplyMask(nan2zeros=True), name='ApplyMaskFixed')
+    mskmov = pe.Node(fsl.ApplyMask(nan2zeros=True), name='ApplyMaskMoving')
+
     # Register the reference of the fieldmap to the reference
     # of the target image (the one that shall be corrected)
     fmap2ref = pe.Node(ants.Registration(
@@ -98,11 +101,15 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
                             ('hmc_movpar', 'in_movpar')]),
         (inputnode, applyxfm, [('fmap', 'input_image')]),
         (inputnode, encfile, [('in_file', 'input_images')]),
-        (inputnode, fmap2ref, [('fmap_ref', 'moving_image'),
-                               ('fmap_mask', 'moving_image_mask')]),
+        (inputnode, fmap2ref, [('fmap_mask', 'moving_image_mask')]),
+        (inputnode, mskmov, [('fmap_ref', 'in_file'),
+                             ('fmap_mask', 'mask_file')]),
+        (align, fmap2ref, [('ref_vol', 'fixed_image_mask')]),
+        (align, mskfix, [('ref_vol', 'in_file'),
+                         ('ref_mask', 'mask_file')]),
+        (mskfix, fmap2ref, [('out_file', 'fixed_image')]),
+        (mskmov, fmap2ref, [('out_file', 'moving_image')]),
 
-        (align, fmap2ref, [('ref_vol', 'fixed_image'),
-                           ('ref_mask', 'fixed_image_mask')]),
         (align, applyxfm, [('ref_vol', 'reference_image')]),
         (align, topup_adapt, [('ref_vol', 'in_ref')]),
         #                      ('out_movpar', 'in_movpar')]),
