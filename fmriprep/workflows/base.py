@@ -151,6 +151,8 @@ def wf_ds005_type(subject_data, settings, name='fMRI_prep'):
 
     # Estimate fieldmap
     fmap_est = fmap_estimator(subject_data, settings=settings)
+    if fmap_est is not None:
+        raise NotImplementedError
 
     # Preprocessing of T1w (includes registration to MNI)
     t1w_pre = t1w_preprocessing(settings=settings)
