@@ -16,6 +16,7 @@ This corresponds to the section 8.9.4 --multiple phase encoded directions (topup
 of the BIDS specification.
 
 """
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from nipype.interfaces import fsl
 from nipype.interfaces import utility as niu
