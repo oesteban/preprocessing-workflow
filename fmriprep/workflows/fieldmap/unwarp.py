@@ -36,7 +36,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
       inputnode.fmap_ref - the fieldmap reference (generally, a *magnitude* image or the
                            resulting SE image)
       inputnode.fmap_mask - a brain mask in fieldmap-space
-      inputnode.fmap - a fieldmap in Hz
+      inputnode.fmap - a fieldmap in Hz (again: this is a fieldmap in Hertzs)
       inputnode.hmc_movpar - the head motion parameters (iff inputnode.in_file is only
                              one 4D file)
 

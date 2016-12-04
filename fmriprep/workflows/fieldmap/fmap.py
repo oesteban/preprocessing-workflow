@@ -21,11 +21,14 @@ from nipype.pipeline import engine as pe
 from nipype.interfaces import utility as niu
 from nipype.interfaces import fsl
 
-WORKFLOW_NAME = 'Fieldmap2Phasediff'
-
-
+WORKFLOW_NAME = 'Fieldmap_direct'
 def fmap_workflow(name=WORKFLOW_NAME, settings=None):
-    """Legacy workflow to create a phasediff map from a fieldmap, to be digested by FUGUE"""
+    """
+    Fieldmap workflow - when we have a sequence that directly measures the fieldmap
+    we just need to mask it (using the corresponding magnitude image) to remove the
+    noise in the surrounding air region, and ensure that units are Hz.
+
+    """
 
     workflow = pe.Workflow(name=name)
     inputnode = pe.Node(niu.IdentityInterface(fields=['fieldmap', 'fmap_mask', 'unwarp_direction',

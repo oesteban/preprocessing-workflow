@@ -28,7 +28,7 @@ from fmriprep.interfaces import ImageDataSink, ReadSidecarJSON
 from fmriprep.viz import stripped_brain_overlay
 from fmriprep.workflows.fieldmap.utils import create_encoding_file
 
-WORKFLOW_NAME = 'Fieldmap_SEs'
+WORKFLOW_NAME = 'FMAP_pepolar'
 
 
 # pylint: disable=R0914
