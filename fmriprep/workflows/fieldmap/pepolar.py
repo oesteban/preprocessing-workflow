@@ -12,6 +12,9 @@ acquisitions with different (generally opposed) phase-encoding (PE) directions.
 
 https://cni.stanford.edu/wiki/Data_Processing#Gradient-reversal_Unwarping_.28.27pepolar.27.29
 
+This corresponds to the section 8.9.4 --multiple phase encoded directions (topup)--
+of the BIDS specification.
+
 """
 
 from nipype.interfaces import fsl
