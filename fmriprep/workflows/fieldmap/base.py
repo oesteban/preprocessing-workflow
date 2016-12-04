@@ -60,8 +60,8 @@ def fieldmap_decider(fieldmap_data, settings):
         elif is_fmap_type('phase', filename):  # 8.9.2
             raise NotImplementedError("No workflow for phase fieldmap data")
         elif is_fmap_type('fieldmap', filename):  # 8.9.3
-            from fmriprep.workflows.fieldmap.fieldmap_to_phasediff import fieldmap_to_phasediff
-            return fieldmap_to_phasediff(settings=settings)
+            from fmriprep.workflows.fieldmap.fmap import fmap_workflow
+            return fmap_workflow(settings=settings)
         elif is_fmap_type('topup', filename):  # 8.0.4
             from fmriprep.workflows.fieldmap.pepolar import pepolar_workflow
             return pepolar_workflow(settings=settings)

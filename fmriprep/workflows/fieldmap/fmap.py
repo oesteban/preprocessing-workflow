@@ -2,6 +2,20 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
+"""
+Fieldmap B0 estimation
+~~~~~~~~~~~~~~~~~~~~~~
+
+When the fieldmap is directly measured with a prescribed sequence (such as
+:abbr:`SE (spiral echo)`), we only need to calculate the corresponding B-Spline
+coefficients to adapt the fieldmap to the TOPUP tool.
+
+https://cni.stanford.edu/wiki/GE_Processing#Fieldmaps
+
+This corresponds to the section 8.9.3 --fieldmap image (and one magnitude image)--
+of the BIDS specification.
+
+"""
 
 from nipype.pipeline import engine as pe
 from nipype.interfaces import utility as niu
@@ -10,7 +24,7 @@ from nipype.interfaces import fsl
 WORKFLOW_NAME = 'Fieldmap2Phasediff'
 
 
-def fieldmap_to_phasediff(name=WORKFLOW_NAME, settings=None):
+def fmap_workflow(name=WORKFLOW_NAME, settings=None):
     """Legacy workflow to create a phasediff map from a fieldmap, to be digested by FUGUE"""
 
     workflow = pe.Workflow(name=name)
