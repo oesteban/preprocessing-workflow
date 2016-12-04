@@ -2,7 +2,17 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
+"""
+PEpolar B0 estimation
+~~~~~~~~~~~~~~~~~~~~~
 
+PE-polar (Phase-Encoding POLARity) is the name coined by GE to the family of
+methods to estimate the inhomogeneity of field B0 inside the scanner by using two
+acquisitions with different (generally opposed) phase-encoding (PE) directions.
+
+https://cni.stanford.edu/wiki/Data_Processing#Gradient-reversal_Unwarping_.28.27pepolar.27.29
+
+"""
 
 from nipype.interfaces import fsl
 from nipype.interfaces import utility as niu
@@ -19,10 +29,13 @@ WORKFLOW_NAME = 'Fieldmap_SEs'
 
 
 # pylint: disable=R0914
-def se_fmap_workflow(name=WORKFLOW_NAME, settings=None):
+def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     """
-    Estimates the fieldmap using TOPUP on series of :abbr:`SE (Spin-Echo)` images
+    Estimates the fieldmap using TOPUP on series of at least two images
     acquired with varying :abbr:`PE (phase encoding)` direction.
+    Generally, the images are :abbr:`SE (Spin-Echo)` and the
+    :abbr:`PE (phase encoding)` directions are opposed (they can also
+    be orthogonal).
 
     Outputs::
 
