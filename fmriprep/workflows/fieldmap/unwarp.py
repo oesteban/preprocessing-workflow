@@ -6,6 +6,8 @@
 Apply susceptibility distortion correction (SDC)
 
 """
+from __future__ import print_function, division, absolute_import, unicode_literals
+
 import pkg_resources as pkgr
 
 from nipype.pipeline import engine as pe
@@ -17,6 +19,7 @@ from niworkflows.interfaces.masks import BETRPT
 
 from fmriprep.utils.misc import gen_list
 from fmriprep.interfaces.bids import ReadSidecarJSON
+from fmriprep.interfaces.fmap import FieldCoefficients
 from fmriprep.workflows.fieldmap.utils import create_encoding_file
 
 SDC_UNWARP_NAME = 'SDC_unwarp'
@@ -70,10 +73,6 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
 
     fslsplit = pe.Node(fsl.Split(dimension='t'), name='ImageHMCSplit')
 
-
-    mskfix = pe.Node(fsl.ApplyMask(nan2zeros=True), name='ApplyMaskFixed')
-    mskmov = pe.Node(fsl.ApplyMask(nan2zeros=True), name='ApplyMaskMoving')
-
     # Register the reference of the fieldmap to the reference
     # of the target image (the one that shall be corrected)
     fmap2ref = pe.Node(ants.Registration(
@@ -87,10 +86,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
         input_names=['in_files'], output_names=['out_movpar'],
         function=_fix_movpar), name='FixMovPar')
 
-    topup_adapt = pe.Node(niu.Function(
-        input_names=['in_file', 'in_ref', 'in_movpar'],
-        output_names=['out_fieldcoef', 'out_movpar'],
-        function=_gen_coeff), name='TopUpAdapt')
+    topup_adapt = pe.Node(FieldCoefficients(), name='TopUpCoefficients')
 
     # Use the least-squares method to correct the dropout of the SBRef images
     unwarp = pe.Node(fsl.ApplyTOPUP(method=method, in_index=[1]), name='TopUpApply')
@@ -101,15 +97,11 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
                             ('hmc_movpar', 'in_movpar')]),
         (inputnode, applyxfm, [('fmap', 'input_image')]),
         (inputnode, encfile, [('in_file', 'input_images')]),
-        (inputnode, fmap2ref, [('fmap_mask', 'moving_image_mask')]),
-        (inputnode, mskmov, [('fmap_ref', 'in_file'),
-                             ('fmap_mask', 'mask_file')]),
-        (align, fmap2ref, [('ref_vol', 'fixed_image_mask')]),
-        (align, mskfix, [('ref_vol', 'in_file'),
-                         ('ref_mask', 'mask_file')]),
-        (mskfix, fmap2ref, [('out_file', 'fixed_image')]),
-        (mskmov, fmap2ref, [('out_file', 'moving_image')]),
+        (inputnode, fmap2ref, [('fmap_ref', 'moving_image'),
+                               ('fmap_mask', 'moving_image_mask')]),
 
+        (align, fmap2ref, [('ref_vol', 'fixed_image'),
+                           ('ref_mask', 'fixed_image_mask')]),
         (align, applyxfm, [('ref_vol', 'reference_image')]),
         (align, topup_adapt, [('ref_vol', 'in_ref')]),
         #                      ('out_movpar', 'in_movpar')]),
@@ -179,64 +171,6 @@ def _multiple_pe_hmc(in_files, in_movpar, in_ref=None):
     out_mask = bet.run().outputs.mask_file
 
     return (out_file, out_ref, out_mask, out_movpar)
-
-
-def _gen_coeff(in_file, in_ref, in_movpar):
-    """Convert to a valid fieldcoeff"""
-    from shutil import copy
-    import numpy as np
-    import nibabel as nb
-    from nipype.interfaces import fsl
-
-    def _get_fname(in_file):
-        import os.path as op
-        fname, fext = op.splitext(op.basename(in_file))
-        if fext == '.gz':
-            fname, _ = op.splitext(fname)
-        return op.abspath(fname)
-
-    out_topup = _get_fname(in_file)
-
-    # 1. Add one dimension (4D image) of 3D coordinates
-    im0 = nb.load(in_file)
-    data = np.zeros_like(im0.get_data())
-    sizes = data.shape[:3]
-    spacings = im0.get_header().get_zooms()[:3]
-    im1 = nb.Nifti1Image(data, im0.get_affine(), im0.get_header())
-    im4d = nb.concat_images([im0, im1, im1])
-    im4d_fname = '{}_{}'.format(out_topup, 'field4D.nii.gz')
-    im4d.to_filename(im4d_fname)
-
-    # 2. Warputils to compute bspline coefficients
-    to_coeff = fsl.WarpUtils(out_format='spline', knot_space=(2, 2, 2))
-    to_coeff.inputs.in_file = im4d_fname
-    to_coeff.inputs.reference = in_ref
-
-    # 3. Remove unnecessary dims (Y and Z)
-    get_first = fsl.ExtractROI(t_min=0, t_size=1)
-    get_first.inputs.in_file = to_coeff.run().outputs.out_file
-
-    # 4. Set correct header
-    # see https://github.com/poldracklab/preprocessing-workflow/issues/92
-    img = nb.load(get_first.run().outputs.roi_file)
-    hdr = img.get_header().copy()
-    hdr['intent_p1'] = spacings[0]
-    hdr['intent_p2'] = spacings[1]
-    hdr['intent_p3'] = spacings[2]
-    hdr['intent_code'] = 2016
-
-    sform = np.eye(4)
-    sform[:3, 3] = sizes
-    hdr.set_sform(sform, code='scanner')
-    hdr['qform_code'] = 1
-
-    out_movpar = '{}_movpar.txt'.format(out_topup)
-    copy(in_movpar, out_movpar)
-
-    out_fieldcoef = '{}_fieldcoef.nii.gz'.format(out_topup)
-    nb.Nifti1Image(img.get_data(), None, hdr).to_filename(out_fieldcoef)
-
-    return out_fieldcoef, out_movpar
 
 
 def _fix_movpar(in_files):
