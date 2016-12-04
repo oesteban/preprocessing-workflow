@@ -38,7 +38,7 @@ def fmap_estimator(subject_data, settings=None):
 
 
     """
-    if subject_data['fmap'] == []:
+    if not subject_data.get('fmap', []):
         LOGGER.info('Fieldmap: no data found for estimation')
         # When there is no data for fieldmap estimation, just return None
         return None
