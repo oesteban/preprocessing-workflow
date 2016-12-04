@@ -54,7 +54,7 @@ def fmap_estimator(subject_data, settings=None):
         from .phdiff import phdiff_workflow
         phwf = phdiff_workflow(settings)
         # set inputs
-        phdif.inputs.inputnode.input_images = subject_data['fmap']
+        phwf.inputs.inputnode.input_images = subject_data['fmap']
         estimator_wfs.append(phwf)
 
     if any(['fieldmap' in fname for fname in subject_data['fmap']]):
