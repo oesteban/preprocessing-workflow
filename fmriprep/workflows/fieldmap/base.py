@@ -5,13 +5,6 @@
 """
 Base fieldmap handling utilities.
 
-Possible fieldmap specifications according to BIDS 1.0.0
---------------------------------------------------------
-
-8.9.1 one phase diff image, at least one magnitude image
-8.9.2 two phase images, two magnitude images
-8.9.3 fieldmap image (and one magnitude image)
-8.9.4 multiple phase encoded directions (topup)
 
 """
 from __future__ import print_function, division, absolute_import, unicode_literals
@@ -55,8 +48,8 @@ def fieldmap_decider(fieldmap_data, settings):
 
     for filename in subject_data['fieldmaps']:
         if is_fmap_type('phasediff', filename):  # 8.9.1
-            from fmriprep.workflows.fieldmap.phase_diff_and_magnitudes import phase_diff_and_magnitudes
-            return phase_diff_and_magnitudes(settings)
+            from fmriprep.workflows.fieldmap.phdiff import phdiff_workflow
+            return phdiff_workflow(settings)
         elif is_fmap_type('phase', filename):  # 8.9.2
             raise NotImplementedError("No workflow for phase fieldmap data")
         elif is_fmap_type('fieldmap', filename):  # 8.9.3

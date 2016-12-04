@@ -32,7 +32,7 @@ def _sort_fmaps(input_images):
             sorted([fname for fname in input_images if 'phasediff' in fname]))
 
 
-def phase_diff_and_magnitudes(settings, name='phase_diff_and_magnitudes'):
+def phdiff_workflow(settings, name='phase_diff_and_magnitudes'):
     """
     Estimates the fieldmap using a phase-difference image and one or more
     magnitude images corresponding to two or more :abbr:`GRE (Gradient Echo sequence)`
