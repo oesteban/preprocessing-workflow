@@ -30,6 +30,13 @@ def fmap_estimator(subject_data, settings=None):
     This workflow selects the fieldmap estimation data available for the subject and
     returns the estimated fieldmap in Hz, along with a corresponding reference image.
 
+    All estimation workflows must produce three outputs:
+
+      * fmap: The estimated fieldmap itself
+      * fmap_ref: the anatomical reference for the fieldmap (magnitude image, corrected SEm, etc.)
+      * fmap_mask: a brain mask for the fieldmap
+
+
     """
     if subject_data['fmap'] == []:
         # When there is no data for fieldmap estimation, just return None
@@ -37,7 +44,7 @@ def fmap_estimator(subject_data, settings=None):
 
     # Otherwise, build the appropriate workflow(s)
     workflow = pe.Workflow(name='FieldmapEstimation')
-    outputnode = pe.Node(niu.IdentityInterface(fields=['fmap', 'fmap_reference']),
+    outputnode = pe.Node(niu.IdentityInterface(fields=['fmap', 'fmap_ref']),
                          name='outputnode')
 
     estimator_wfs = []
@@ -69,7 +76,8 @@ def fmap_estimator(subject_data, settings=None):
         workflow.connect([
             (estimator_wfs[0], outputnode, [
                 ('outputnode.fmap', 'fmap'),
-                ('outputnode.fmap_reference', 'fmap_reference')])
+                ('outputnode.fmap_ref', 'fmap_ref'),
+                ('outputnode.fmap_mask', 'fmap_mask')])
         ])
 
 
