@@ -21,6 +21,7 @@ from niworkflows.interfaces.registration import RobustMNINormalizationRPT
 from niworkflows.anat.skullstrip import afni_wf as skullstrip_wf
 from niworkflows.data import get_mni_icbm152_nlin_asym_09c
 from niworkflows.interfaces.masks import BrainExtractionRPT
+from niworkflows.interfaces.segmentation import FASTRPT
 
 from fmriprep.interfaces import (DerivativesDataSink, IntraModalMerge,
                                  ImageDataSink)
@@ -59,7 +60,8 @@ def t1w_preprocessing(name='t1w_preprocessing', settings=None):
         asw = skullstrip_ants(settings=settings)
 
     # 4. Segmentation
-    t1_seg = pe.Node(fsl.FAST(no_bias=True, probability_maps=True),
+    t1_seg = pe.Node(FASTRPT(generate_report=True, segments=True,
+                             no_bias=True, probability_maps=True),
                      name='Segmentation')
 
     # 5. Spatial normalization (T1w to MNI registration)
@@ -214,39 +216,40 @@ def t1w_preprocessing(name='t1w_preprocessing', settings=None):
     # Write corrected file in the designated output dir
     ds_t1_bias = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='inu'),
+                            suffix='preproc'),
         name='DerivT1_inu'
     )
     ds_t1_seg = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='inu_seg'),
+                            suffix='dtissue'),
         name='DerivT1_seg'
     )
     ds_mask = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='bmask'),
+                            suffix='brainmask'),
         name='DerivT1_mask'
     )
     ds_t1_mni = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='mni'),
+                            suffix='space-MNI152NLin2009cAsym_preproc'),
         name='DerivT1w_MNI'
     )
     ds_t1_mni_aff = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='mni_affine'),
+                            suffix='target-MNI152NLin2009cAsym_affine'),
         name='DerivT1w_MNI_affine'
     )
     ds_bmask_mni = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='bmask_mni'),
+                            suffix='space-MNI152NLin2009cAsym_brainmask'),
         name='DerivT1_Mask_MNI'
     )
     ds_tpms_mni = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='tpm_mni'),
+                            suffix='space-MNI152NLin2009cAsym_class-{extra_value}_probtissue'),
         name='DerivT1_TPMs_MNI'
     )
+    ds_tpms_mni.inputs.extra_values = ['CSF', 'GM', 'WM']
 
     if settings.get('debug', False):
         workflow.connect([
@@ -255,7 +258,7 @@ def t1w_preprocessing(name='t1w_preprocessing', settings=None):
     else:
         ds_t1_mni_warp = pe.Node(
             DerivativesDataSink(base_directory=settings['output_dir'],
-                                suffix='mni_warp'), name='DerivT1w_MNI_warp')
+                                suffix='target-MNI152NLin2009cAsym_warp'), name='mni_warp')
 
         def _get_aff(inlist):
             return inlist[:-1]
@@ -279,7 +282,7 @@ def t1w_preprocessing(name='t1w_preprocessing', settings=None):
         (inputnode, ds_t1_mni_aff, [('t1w', 'source_file')]),
         (inputnode, ds_bmask_mni, [('t1w', 'source_file')]),
         (inputnode, ds_tpms_mni, [('t1w', 'source_file')]),
-        (asw, ds_t1_bias, [('outputnode.out_file', 'in_file')]),
+        (inu_n4, ds_t1_bias, [('output_image', 'in_file')]),
         (t1_seg, ds_t1_seg, [('tissue_class_map', 'in_file')]),
         (asw, ds_mask, [('outputnode.out_mask', 'in_file')]),
         (t1_2_mni, ds_t1_mni, [('warped_image', 'in_file')]),
