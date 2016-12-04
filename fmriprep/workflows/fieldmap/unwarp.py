@@ -24,7 +24,8 @@ SDC_UNWARP_NAME = 'SDC_unwarp'
 
 def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
     """
-    This workflow takes an estimated fieldmap and a target image and applies TOPUP,
+    This workflow takes an estimated fieldmap (in Hz) and a target image to be
+    corrected. For correction, it applies TOPUP,
     an :abbr:`SDC (susceptibility-derived distortion correction)` method in FSL to
     unwarp the target image.
 

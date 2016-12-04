@@ -31,8 +31,6 @@ tool. That is implemented in the unwarp module.
 """
 from __future__ import print_function, division, absolute_import, unicode_literals
 
-from .fmap import fmap_workflow
-from .pepolar import pepolar_workflow
-from .phdiff import phdiff_workflow
+from .base import fmap_estimator
 from .unwarp import sdc_unwarp
 from .utils import create_encoding_file, mcflirt2topup

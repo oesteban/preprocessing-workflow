@@ -16,7 +16,7 @@ from fmriprep.workflows import confounds
 
 from fmriprep.workflows.anatomical import t1w_preprocessing
 from fmriprep.workflows.sbref import sbref_preprocess, sbref_t1_registration
-from fmriprep.workflows.fieldmap import phase_diff_and_magnitudes
+from fmriprep.workflows.fieldmap import fmap_estimator
 from fmriprep.workflows.epi import (
     epi_unwarp, epi_hmc, epi_sbref_registration,
     epi_mean_t1_registration, epi_mni_transformation)
@@ -49,9 +49,6 @@ def wf_ds054_type(subject_data, settings, name='fMRI_prep'):
 
       * [x] Has at least one T1w and at least one bold file (minimal reqs.)
       * [x] Has one or more SBRefs
-      * [x] Has one or more GRE-phasediff images, including the corresponding magnitude images.
-      * [ ] No SE-fieldmap images
-      * [ ] No Spiral Echo fieldmap
 
     """
 
@@ -70,7 +67,7 @@ def wf_ds054_type(subject_data, settings, name='fMRI_prep'):
     t1w_pre = t1w_preprocessing(settings=settings)
 
     # Estimate fieldmap
-    fmap_est = phase_diff_and_magnitudes(settings)
+    fmap_est = fmap_estimator(subject_data, settings=settings)
 
     # Correct SBRef
     sbref_pre = sbref_preprocess(settings=settings)
@@ -136,9 +133,6 @@ def wf_ds005_type(subject_data, settings, name='fMRI_prep'):
 
       * [x] Has at least one T1w and at least one bold file (minimal reqs.)
       * [ ] No SBRefs
-      * [ ] No GRE-phasediff images, including the corresponding magnitude images.
-      * [ ] No SE-fieldmap images
-      * [ ] No Spiral Echo fieldmap
 
     """
 
@@ -153,6 +147,10 @@ def wf_ds005_type(subject_data, settings, name='fMRI_prep'):
 
     bidssrc = pe.Node(BIDSDataGrabber(subject_data=subject_data),
                       name='BIDSDatasource')
+
+
+    # Estimate fieldmap
+    fmap_est = fmap_estimator(subject_data, settings=settings)
 
     # Preprocessing of T1w (includes registration to MNI)
     t1w_pre = t1w_preprocessing(settings=settings)
