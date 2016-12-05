@@ -11,7 +11,6 @@ Originally coded by Craig Moodie. Refactored by the CRN Developers.
 import os.path as op
 
 from nipype.interfaces import ants
-from nipype.interfaces import freesurfer as fs
 from nipype.interfaces import fsl
 from nipype.interfaces import io as nio
 from nipype.interfaces import utility as niu
@@ -25,6 +24,7 @@ from niworkflows.interfaces.segmentation import FASTRPT
 
 from fmriprep.interfaces import (DerivativesDataSink, IntraModalMerge,
                                  ImageDataSink)
+from fmriprep.interfaces.utils import reorient
 from fmriprep.viz import stripped_brain_overlay
 
 
@@ -47,7 +47,9 @@ def t1w_preprocessing(name='t1w_preprocessing', settings=None):
     t1wmrg = pe.Node(IntraModalMerge(), name='MergeT1s')
 
     # 1. Reorient T1
-    arw = pe.Node(fs.MRIConvert(out_type='niigz', out_orientation='LAS'),
+    arw = pe.Node(niu.Function(input_names=['in_file'],
+                               output_names=['out_file'],
+                               function=reorient),
                   name='Reorient')
 
     # 2. T1 Bias Field Correction
@@ -68,12 +70,15 @@ def t1w_preprocessing(name='t1w_preprocessing', settings=None):
     t1_2_mni = pe.Node(
         RobustMNINormalizationRPT(
             generate_report=True,
-            num_threads=settings.get('ants_threads', 6),
+            num_threads=settings['ants_nthreads'],
             testing=settings.get('debug', False),
             template='mni_icbm152_nlin_asym_09c'
         ),
         name='T1_2_MNI_Registration'
     )
+    # should not be necesssary byt does not hurt - make sure the multiproc
+    # scheduler knows the resource limits
+    t1_2_mni.interface.num_threads = settings['ants_nthreads']
 
     # Resample the brain mask and the tissue probability maps into mni space
     bmask_mni = pe.Node(
@@ -307,8 +312,14 @@ def skullstrip_ants(name='ANTsBrainExtraction', settings=None):
 
     t1_skull_strip = pe.Node(BrainExtractionRPT(
         dimension=3, use_floatingpoint_precision=1,
-        debug=settings['debug'], generate_report=True),
+        debug=settings['debug'], generate_report=True,
+        num_threads=settings['ants_nthreads']),
         name='Ants_T1_Brain_Extraction')
+
+    # should not be necesssary byt does not hurt - make sure the multiproc
+    # scheduler knows the resource limits
+    t1_skull_strip.interface.num_threads = settings['ants_nthreads']
+
     t1_skull_strip.inputs.brain_template = op.join(
         get_ants_oasis_template_ras(),
         'T_template0.nii.gz'
