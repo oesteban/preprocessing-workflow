@@ -414,7 +414,7 @@ def epi_unwarp(name='EPIUnwarpWorkflow', settings=None):
         name='outputnode'
     )
 
-    unwarp = sdc_unwarp()
+    unwarp = sdc_unwarp(testing=settings.get('debug', False))
     unwarp.inputs.inputnode.hmc_movpar = ''
 
     # Compute outputs

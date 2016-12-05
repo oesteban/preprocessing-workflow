@@ -42,7 +42,7 @@ def sbref_preprocess(name='SBrefPreprocessing', settings=None):
                          name='outputnode')
 
     # Unwarping
-    unwarp = sdc_unwarp()
+    unwarp = sdc_unwarp(testing=settings.get('debug', False))
     unwarp.inputs.inputnode.hmc_movpar = ''
 
     mean = pe.Node(fsl.MeanImage(dimension='T'), name='SBRefMean')

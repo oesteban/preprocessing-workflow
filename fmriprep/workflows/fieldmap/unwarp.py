@@ -14,6 +14,7 @@ from nipype.pipeline import engine as pe
 from nipype.interfaces import fsl
 from nipype.interfaces import ants
 from nipype.interfaces import utility as niu
+from niworkflows.interfaces.registration import ANTSRegistrationRPT
 
 from fmriprep.interfaces.bids import ReadSidecarJSON
 from fmriprep.interfaces.fmap import FieldCoefficients
@@ -22,7 +23,7 @@ from fmriprep.workflows.fieldmap.utils import create_encoding_file
 SDC_UNWARP_NAME = 'SDC_unwarp'
 
 
-def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
+def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     """
     This workflow takes an estimated fieldmap and a target image and applies TOPUP,
     an :abbr:`SDC (susceptibility-derived distortion correction)` method in FSL to
@@ -72,9 +73,13 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac'):
 
     # Register the reference of the fieldmap to the reference
     # of the target image (the one that shall be corrected)
-    fmap2ref = pe.Node(ants.Registration(
-        from_file=pkgr.resource_filename('fmriprep', 'data/fmap-any_registration.json'),
-        output_warped_image=True), name='Fieldmap2ImageRegistration')
+    ants_settings = pkgr.resource_filename('fmriprep', 'data/fmap-any_registration.json')
+    if testing:
+        ants_settings = pkgr.resource_filename(
+            'fmriprep', 'data/fmap-any_registration_testing.json')
+
+    fmap2ref = pe.Node(ANTSRegistrationRPT(from_file=ants_settings, output_warped_image=True,
+                       generate_report=True), name='FMap2ImageRegistration')
 
     applyxfm = pe.Node(ants.ApplyTransforms(
         dimension=3, interpolation='Linear'), name='Fieldmap2ImageApply')
