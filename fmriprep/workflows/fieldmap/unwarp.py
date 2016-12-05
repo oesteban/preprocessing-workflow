@@ -13,11 +13,8 @@ import pkg_resources as pkgr
 from nipype.pipeline import engine as pe
 from nipype.interfaces import fsl
 from nipype.interfaces import ants
-from nipype.interfaces import io as nio
 from nipype.interfaces import utility as niu
-from niworkflows.interfaces.masks import BETRPT
 
-from fmriprep.utils.misc import gen_list
 from fmriprep.interfaces.bids import ReadSidecarJSON
 from fmriprep.interfaces.fmap import FieldCoefficients
 from fmriprep.workflows.fieldmap.utils import create_encoding_file

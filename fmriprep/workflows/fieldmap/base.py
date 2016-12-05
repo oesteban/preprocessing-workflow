@@ -17,7 +17,6 @@ Base fieldmap estimation
 
 """
 from __future__ import print_function, division, absolute_import, unicode_literals
-from future.utils import raise_from
 
 from nipype.interfaces import utility as niu
 from nipype.pipeline import engine as pe

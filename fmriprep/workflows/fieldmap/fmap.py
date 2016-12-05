@@ -27,8 +27,8 @@ from niworkflows.interfaces.masks import BETRPT
 from fmriprep.interfaces import IntraModalMerge
 
 
-WORKFLOW_NAME = 'Fieldmap_direct'
-def fmap_workflow(name=WORKFLOW_NAME, settings=None):
+WORKFLOW_NAME = 'FMAP_fmap'
+def fmap_workflow(name=WORKFLOW_NAME):
     """
     Fieldmap workflow - when we have a sequence that directly measures the fieldmap
     we just need to mask it (using the corresponding magnitude image) to remove the
