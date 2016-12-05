@@ -57,9 +57,13 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     outputnode = pe.Node(niu.IdentityInterface(
         fields=['fmap', 'fmap_mask', 'fmap_ref']), name='outputnode')
 
+    sortfmaps = pe.Node(niu.Function(function=_sort_fmaps,
+                                     input_names=['input_images'],
+                                     output_names=['out_files']),
+                        name='SortFmaps')
+
     # Read metadata
-    meta = pe.MapNode(ReadSidecarJSON(fields=['TotalReadoutTime', 'PhaseEncodingDirection']),
-                      iterfield=['in_file'], name='metadata')
+    meta = pe.MapNode(ReadSidecarJSON(), iterfield=['in_file'], name='metadata')
 
     encfile = pe.Node(interface=niu.Function(
         input_names=['input_images', 'in_dict'], output_names=['parameters_file'],
@@ -84,9 +88,10 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     mag_bet = pe.Node(BETRPT(mask=True, robust=True), name='SE_brain')
 
     workflow.connect([
-        (inputnode, meta, [('input_images', 'in_file')]),
-        (inputnode, encfile, [('input_images', 'input_images')]),
-        (inputnode, fslmerge, [('input_images', 'in_files')]),
+        (inputnode, sortfmaps, [('input_images', 'input_images')]),
+        (sortfmaps, meta, [('out_files', 'in_file')]),
+        (sortfmaps, encfile, [('out_files', 'input_images')]),
+        (sortfmaps, fslmerge, [('out_files', 'in_files')]),
         (fslmerge, hmc_se, [('merged_file', 'in_file')]),
         (meta, encfile, [('out_dict', 'in_dict')]),
         (encfile, topup, [('parameters_file', 'encoding_file')]),
@@ -122,7 +127,11 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
         (unwarp_mag, se_svg_ds, [('out_corrected', 'overlay_file')]),
         (mag_bet, se_svg_ds, [('mask_file', 'base_file')]),
         (se_svg, se_svg_ds, [('out_file', 'in_file')]),
-        (inputnode, se_svg_ds, [(('input_images', _first), 'origin_file')])
+        (sortfmaps, se_svg_ds, [(('out_files', _first), 'origin_file')])
     ])
 
     return workflow
+
+def _sort_fmaps(input_images):
+    ''' just a little data massaging'''
+    return sorted([fname for fname in input_images if 'epi' in fname])
