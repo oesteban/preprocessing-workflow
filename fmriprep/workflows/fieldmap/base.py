@@ -71,21 +71,22 @@ def fmap_estimator(subject_data, settings=None):
     if any(['epi' in op.basename(fname) for fname in subject_data['fmap']]):
         LOGGER.info('Fieldmap estimation: phase-encoding images found')
         from .pepolar import pepolar_workflow
-        pewf = pepolar_workflow(settings)
+        pewf = pepolar_workflow(settings=settings)
         # set inputs
-        pewf.inputs.inputnode.input_images = subject_data['fmap']
+        pewf.inputs.inputnode.input_images = subject_data['fmap'] + subject_data['sbref']
         estimator_wfs.append(pewf)
 
     if len(estimator_wfs) > 1:
         # Average estimated workflows (requires registration)
-        raise NotImplementedError
-    else:
-        workflow.connect([
-            (estimator_wfs[0], outputnode, [
-                ('outputnode.fmap', 'fmap'),
-                ('outputnode.fmap_ref', 'fmap_ref'),
-                ('outputnode.fmap_mask', 'fmap_mask')])
-        ])
+        LOGGER.warning('Averaging estimations of the fieldmap is not yet '
+                       'implemented.')
+
+    workflow.connect([
+        (estimator_wfs[-1], outputnode, [
+            ('outputnode.fmap', 'fmap'),
+            ('outputnode.fmap_ref', 'fmap_ref'),
+            ('outputnode.fmap_mask', 'fmap_mask')])
+    ])
 
 
     return workflow

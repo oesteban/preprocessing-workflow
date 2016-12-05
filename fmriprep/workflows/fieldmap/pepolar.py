@@ -134,4 +134,6 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
 
 def _sort_fmaps(input_images):
     ''' just a little data massaging'''
-    return sorted([fname for fname in input_images if 'epi' in fname])
+    fmaps = sorted([fname for fname in input_images if 'epi' in fname])
+    fmaps += sorted([fname for fname in input_images if 'sbref' in fname])
+    return fmaps
