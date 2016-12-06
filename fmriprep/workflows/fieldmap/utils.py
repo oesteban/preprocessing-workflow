@@ -41,6 +41,8 @@ def create_encoding_file(input_images, in_dict):
             raise RuntimeError('PhaseEncodingDirection not found among '
                                'metadata of file "%s"', fmap)
 
+        fmapnii = nb.load(fmap)
+        axcode = nb.aff2axcodes(.affine)[meta_pe[0]]
         pe_axis = pe_dirs[meta_pe[0]]
         if readout_time is None:
             if eff_echo is None:
@@ -52,11 +54,18 @@ def create_encoding_file(input_images, in_dict):
             # Particularly "the final column is the time (in seconds) between the readout of the
             # centre of the first echo and the centre of the last echo (equal to dwell-time
             # multiplied by # of phase-encode steps minus one)"
-            pe_size = nb.load(fmap).get_data().shape[pe_axis]
+            pe_size = fmapnii.get_data().shape[pe_axis]
             readout_time = eff_echo * (pe_size - 1)
 
+
         line_values = [0, 0, 0, readout_time]
-        line_values[pe_axis] = 1 + (-2*(len(meta['PhaseEncodingDirection']) == 2))
+        line_values[pe_axis] = 1
+
+        if axcode == 'L' or axcode == 'P':
+            line_values[pe_axis] = -1.0
+
+        if meta_pe.endswith('-'):
+            line_values[pe_axis] *= -1.0
 
         nvols = 1
         if len(nb.load(fmap).shape) > 3:
