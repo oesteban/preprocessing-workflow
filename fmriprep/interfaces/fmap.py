@@ -8,13 +8,18 @@ Interfaces to deal with the various types of fieldmap sources
 """
 from __future__ import print_function, division, absolute_import, unicode_literals
 
+import os.path as op
 from shutil import copy
+from builtins import range
 import numpy as np
 import nibabel as nb
+from nipype import logging
+from nipype.interfaces.base import (BaseInterface, BaseInterfaceInputSpec, TraitedSpec,
+                                    File, isdefined, traits)
 from nipype.interfaces import fsl
 
-from nipype.interfaces.base import (BaseInterface, BaseInterfaceInputSpec, TraitedSpec,
-                                    File, isdefined)
+LOGGER = logging.getLogger('interfaces')
+
 
 class FieldCoefficientsInputSpec(BaseInterfaceInputSpec):
     in_file = File(exists=True, mandatory=True, desc='input fieldmap')
@@ -105,3 +110,102 @@ def _gen_coeff(in_file, in_ref, in_movpar=None):
     nb.Nifti1Image(img.get_data(), None, hdr).to_filename(out_fieldcoef)
 
     return out_fieldcoef, out_movpar
+
+
+class FieldEnhanceInputSpec(BaseInterfaceInputSpec):
+    in_file = File(exists=True, mandatory=True, desc='input fieldmap')
+    in_mask = File(exists=True, mandatory=True, desc='brain mask')
+    despike = traits.Bool(True, usedefault=True, desc='run despike filter?')
+    mask_dilate = traits.Int(1, usedefault=True, desc='mask dilation iterations')
+    despike_threshold = traits.Float(0.2, usedefault=True, desc='mask dilation iterations')
+
+
+class FieldEnhanceOutputSpec(TraitedSpec):
+    out_file = File(desc='the output fieldmap')
+
+class FieldEnhance(BaseInterface):
+    """
+    The FieldEnhance interface wraps a workflow to massage the input fieldmap
+    and return it masked, despiked, etc.
+    """
+    input_spec = FieldEnhanceInputSpec
+    output_spec = FieldEnhanceOutputSpec
+
+    def __init__(self, **inputs):
+        self._results = {}
+        super(FieldEnhance, self).__init__(**inputs)
+
+    def _list_outputs(self):
+        return self._results
+
+    def _run_interface(self, runtime):
+        from scipy import ndimage as sim
+        from scipy.ndimage.morphology import grey_dilation
+
+        masknii = nb.load(self.inputs.in_mask)
+        mask = masknii.get_data().astype(np.uint8)
+
+        # Dilate mask
+        struc = sim.iterate_structure(sim.generate_binary_structure(3, 2), 1)
+        mask = sim.binary_erosion(
+            mask, struc,
+            iterations=self.inputs.mask_dilate).astype(np.uint8)  # pylint: disable=no-member
+
+        nb.Nifti1Image(mask, masknii.get_affine(), masknii.get_header()).to_filename('mask.nii.gz')
+
+        # Apply mask
+        fmap_nii = nb.load(self.inputs.in_file)
+        data = fmap_nii.get_data().astype(np.float32)
+        data[mask == 0] = 0.0
+
+        # Despike / denoise
+        nslices = data.shape[-1]
+        struc = sim.iterate_structure(sim.generate_binary_structure(2, 1), 1)
+        for k in range(nslices):
+            data2d = data[..., k]
+            if np.any(data2d > 0):
+                data[..., k] = grey_dilation(data2d, structure=struc)
+
+
+        if self.inputs.despike:
+            data = _despike2d(data, self.inputs.despike_threshold)
+        out_file, ext = op.splitext(op.basename(self.inputs.in_file))
+        if ext == '.gz':
+            out_file, ext2 = op.splitext(out_file)
+            ext = ext2 + ext
+
+        self._results['out_file'] = op.abspath('%s_enhanced%s' % (out_file, ext))
+
+        hdr = fmap_nii.get_header().copy()
+        hdr.set_data_dtype(np.float32)
+        nb.Nifti1Image(data.astype(np.float32), fmap_nii.get_affine(), hdr).to_filename(
+            self._results['out_file'])
+        return runtime
+
+
+def _despike2d(data, thres, neigh=None):
+    if neigh is None:
+        neigh = [-1, 0, 1]
+    nslices = data.shape[-1]
+
+    for k in range(nslices):
+        data2d = data[..., k]
+
+        for i in range(data2d.shape[0]):
+            for j in range(data2d.shape[1]):
+                vals = []
+                thisval = data2d[i, j]
+                for ii in neigh:
+                    for jj in neigh:
+                        try:
+                            vals.append(data2d[i + ii, j + jj])
+                        except IndexError:
+                            pass
+                vals = np.array(vals)
+                patch_range = vals.max() - vals.min()
+                patch_med = np.median(vals)
+
+                if (patch_range > 1e-6 and
+                        (abs(thisval - patch_med) / patch_range) > thres):
+                    data[i, j, k] = patch_med
+    return data

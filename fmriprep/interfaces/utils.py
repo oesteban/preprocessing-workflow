@@ -6,13 +6,16 @@
 # @Author: oesteban
 # @Date:   2016-06-03 09:35:13
 # @Last Modified by:   oesteban
-# @Last Modified time: 2016-08-17 17:41:23
+# @Last Modified time: 2016-12-05 14:29:30
+from __future__ import print_function, division, absolute_import, unicode_literals
+
 import os
 import numpy as np
 import os.path as op
+import nibabel as nb
 from nipype.interfaces.base import (traits, isdefined, TraitedSpec, BaseInterface,
                                     BaseInterfaceInputSpec, File, InputMultiPath,
-                                    OutputMultiPath)
+                                    OutputMultiPath, Undefined)
 from nipype.interfaces import fsl
 
 class IntraModalMergeInputSpec(BaseInterfaceInputSpec):
@@ -34,16 +37,19 @@ class IntraModalMerge(BaseInterface):
         super(IntraModalMerge, self).__init__(**inputs)
 
     def _run_interface(self, runtime):
-        if len(self.inputs.in_files) == 1:
-            self._results['out_file'] = self.inputs.in_files[0]
-            self._results['out_avg'] = self.inputs.in_files[0]
-            # TODO: generate identity out_mats and zero-filled out_movpar
+        in_files = self.inputs.in_files
+        if len(in_files) == 1:
+            if nb.load(in_files[0]).get_data().ndim < 4:
+                self._results['out_file'] = self.inputs.in_files[0]
+                self._results['out_avg'] = self.inputs.in_files[0]
+                # TODO: generate identity out_mats and zero-filled out_movpar
+                return runtime
+        else:
+            magmrg = fsl.Merge(dimension='t', in_files=self.inputs.in_files)
+            in_files = magmrg.run().outputs.merged_file
 
-            return runtime
-
-        magmrg = fsl.Merge(dimension='t', in_files=self.inputs.in_files)
         mcflirt = fsl.MCFLIRT(cost='normcorr', save_mats=True, save_plots=True,
-                              ref_vol=0, in_file=magmrg.run().outputs.merged_file)
+                              ref_vol=0, in_file=in_files[0])
         mcres = mcflirt.run()
         self._results['out_mats'] = mcres.outputs.mat_file
         self._results['out_movpar'] = mcres.outputs.par_file

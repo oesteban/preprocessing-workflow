@@ -1,17 +1,32 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# vi: set ft=python sts=4 ts=4 sw=4 et:
+"""
+Image tools interfaces
+~~~~~~~~~~~~~~~~~~~~~~
+
+
+"""
+from __future__ import print_function, division, absolute_import, unicode_literals
+
 import json
 import re
 import os
 import os.path as op
 from shutil import copy
 
+import nibabel as nb
 from nipype import logging
 from nipype.interfaces.base import (
-    traits, isdefined, TraitedSpec, BaseInterface, BaseInterfaceInputSpec, 
+    traits, isdefined, TraitedSpec, BaseInterface, BaseInterfaceInputSpec,
     File, InputMultiPath, OutputMultiPath, traits
 )
 
-from fmriprep.interfaces.bids import _splitext 
+from fmriprep.interfaces.bids import _splitext
 from fmriprep.utils.misc import make_folder
+
+LOGGER = logging.getLogger('interface')
 
 class ImageDataSinkInputSpec(BaseInterfaceInputSpec):
     base_directory = traits.Directory(
@@ -86,3 +101,38 @@ class ImageDataSink(BaseInterface):
 
     def _list_outputs(self):
         return self._results
+
+
+class CopyHeaderInputSpec(BaseInterfaceInputSpec):
+    in_file = File(exists=True, mandatory=True, desc='the file we get the data from')
+    hdr_file = File(exists=True, mandatory=True, desc='the file we get the header from')
+
+class CopyHeaderOutputSpec(TraitedSpec):
+    out_file = OutputMultiPath(File(exists=True, desc='written file path'))
+
+class CopyHeader(BaseInterface):
+    input_spec = CopyHeaderInputSpec
+    output_spec = CopyHeaderOutputSpec
+
+    def __init__(self, **inputs):
+        self._results = {}
+        super(CopyHeader, self).__init__(**inputs)
+
+    def _list_outputs(self):
+        return self._results
+
+    def _run_interface(self, runtime):
+
+        hdr = nb.load(self.inputs.hdr_file).get_header().copy()
+        aff = nb.load(self.inputs.hdr_file).get_affine()
+        data = nb.load(self.inputs.in_file).get_data()
+
+        fname, ext = op.splitext(op.basename(self.inputs.in_file))
+        if ext == '.gz':
+            fname, ext2 = op.splitext(fname)
+            ext = ext2 + ext
+
+        out_name = op.abspath('{}_fixhdr{}'.format(fname, ext))
+        nb.Nifti1Image(data, aff, hdr).to_filename(out_name)
+        self._results['out_file'] = out_name
+        return runtime

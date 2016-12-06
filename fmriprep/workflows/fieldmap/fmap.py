@@ -24,8 +24,8 @@ from nipype.interfaces import ants
 
 from nipype.interfaces import fsl
 from niworkflows.interfaces.masks import BETRPT
-from fmriprep.interfaces import IntraModalMerge
-
+from fmriprep.interfaces import IntraModalMerge, CopyHeader
+from fmriprep.interfaces.fmap import FieldEnhance
 
 WORKFLOW_NAME = 'FMAP_fmap'
 def fmap_workflow(name=WORKFLOW_NAME):
@@ -53,21 +53,24 @@ def fmap_workflow(name=WORKFLOW_NAME):
 
     # de-gradient the fields ("bias/illumination artifact")
     n4 = pe.Node(ants.N4BiasFieldCorrection(dimension=3), name='MagnitudeBias')
+    cphdr = pe.Node(CopyHeader(), name='FixHDR')
     bet = pe.Node(BETRPT(generate_report=True, frac=0.6, mask=True),
                   name='MagnitudeBET')
-    applymsk = pe.Node(fsl.ApplyMask(nan2zeros=True), name='ApplyMask')
+    fmapenh = pe.Node(FieldEnhance(), name='FieldmapMassage')
 
     workflow.connect([
         (inputnode, sortfmaps, [('input_images', 'input_images')]),
         (sortfmaps, magmrg, [('magnitude', 'in_files')]),
         (magmrg, n4, [('out_file', 'input_image')]),
-        (n4, bet, [('output_image', 'in_file')]),
+        (n4, cphdr, [('output_image', 'in_file')]),
+        (magmrg, cphdr, [('out_file', 'hdr_file')]),
+        (cphdr, bet, [('out_file', 'in_file')]),
         (sortfmaps, fmapmrg, [('fieldmap', 'in_files')]),
-        (fmapmrg, applymsk, [('out_file', 'in_file')]),
-        (bet, applymsk, [('mask_file', 'mask_file')]),
-        (applymsk, outputnode, [('out_file', 'fmap')]),
+        (fmapmrg, fmapenh, [('out_file', 'in_file')]),
+        (bet, fmapenh, [('mask_file', 'in_mask')]),
+        (fmapenh, outputnode, [('out_file', 'fmap')]),
         (bet, outputnode, [('mask_file', 'fmap_mask')]),
-        (n4, outputnode, [('output_image', 'fmap_ref')])
+        (cphdr, outputnode, [('out_file', 'fmap_ref')])
     ])
     return workflow
 

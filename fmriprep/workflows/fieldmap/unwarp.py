@@ -14,7 +14,7 @@ from nipype.pipeline import engine as pe
 from nipype.interfaces import fsl
 from nipype.interfaces import ants
 from nipype.interfaces import utility as niu
-from niworkflows.interfaces.registration import ANTSRegistrationRPT
+from niworkflows.interfaces.registration import ANTSRegistrationRPT, ANTSApplyTransformsRPT
 
 from fmriprep.interfaces.bids import ReadSidecarJSON
 from fmriprep.interfaces.fmap import FieldCoefficients
@@ -79,10 +79,10 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
             'fmriprep', 'data/fmap-any_registration_testing.json')
 
     fmap2ref = pe.Node(ANTSRegistrationRPT(from_file=ants_settings, output_warped_image=True,
-                       generate_report=True), name='FMap2ImageRegistration')
+                       generate_report=True), name='FMap2ImageMagnitude')
 
-    applyxfm = pe.Node(ants.ApplyTransforms(
-        dimension=3, interpolation='Linear'), name='Fieldmap2ImageApply')
+    applyxfm = pe.Node(ANTSApplyTransformsRPT(
+        generate_report=True, dimension=3, interpolation='Linear'), name='FMap2ImageFieldmap')
 
     fix_movpar = pe.Node(niu.Function(
         input_names=['in_files'], output_names=['out_movpar'],
@@ -101,7 +101,6 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
         (inputnode, encfile, [('in_file', 'input_images')]),
         (inputnode, fmap2ref, [('fmap_ref', 'moving_image'),
                                ('fmap_mask', 'moving_image_mask')]),
-
         (align, fmap2ref, [('ref_vol', 'fixed_image'),
                            ('ref_mask', 'fixed_image_mask')]),
         (align, applyxfm, [('ref_vol', 'reference_image')]),
@@ -110,9 +109,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
 
         (meta, encfile, [('out_dict', 'in_dict')]),
 
-        (fmap2ref, applyxfm, [
-            ('forward_transforms', 'transforms'),
-            ('forward_invert_flags', 'invert_transform_flags')]),
+        (fmap2ref, applyxfm, [('forward_transforms', 'transforms')]),
         (align, fslsplit, [('out_file', 'in_file')]),
         (fslsplit, fix_movpar, [('out_files', 'in_files')]),
         (fix_movpar, topup_adapt, [('out_movpar', 'in_movpar')]),
