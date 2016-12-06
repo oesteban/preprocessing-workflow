@@ -42,7 +42,6 @@ def create_encoding_file(input_images, in_dict):
                                'metadata of file "%s"', fmap)
 
         fmapnii = nb.load(fmap)
-        axcode = nb.aff2axcodes(fmapnii.affine)[meta_pe[0]]
         pe_axis = pe_dirs[meta_pe[0]]
         if readout_time is None:
             if eff_echo is None:
@@ -59,13 +58,8 @@ def create_encoding_file(input_images, in_dict):
 
 
         line_values = [0, 0, 0, readout_time]
-        line_values[pe_axis] = 1
-
-        if axcode == 'L' or axcode == 'P':
-            line_values[pe_axis] = -1.0
-
-        if meta_pe.endswith('-'):
-            line_values[pe_axis] *= -1.0
+        line_values[pe_axis] = -1.0 if meta_pe.endswith('-') else 1.0
+        line_values[pe_axis] *= nb.io_orientation(fmapnii.affine)[pe_axis][1]
 
         nvols = 1
         if len(nb.load(fmap).shape) > 3:
@@ -73,9 +67,13 @@ def create_encoding_file(input_images, in_dict):
 
         enc_table += [line_values] * nvols
 
-    np.savetxt(os.path.abspath('parameters.txt'), enc_table,
-               fmt=['%0.1f', '%0.1f', '%0.1f', '%0.20f'])
-    return os.path.abspath('parameters.txt')
+    unwarp_file = os.path.abspath('unwarp_params.txt')
+    np.savetxt(unwarp_file, enc_table, fmt=['%0.1f', '%0.1f', '%0.1f', '%0.20f'])
+    warp_file = os.path.abspath('warp_params.txt')
+    inv_enc_table = np.array(enc_table)
+    inv_enc_table[:, pe_axis] *= -1.0
+    np.savetxt(warp_file, inv_enc_table, fmt=['%0.1f', '%0.1f', '%0.1f', '%0.20f'])
+    return unwarp_file, warp_file
 
 def mcflirt2topup(in_files, in_mats, out_movpar=None):
     """

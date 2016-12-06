@@ -66,10 +66,16 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     meta = pe.MapNode(ReadSidecarJSON(), iterfield=['in_file'], name='metadata')
 
     encfile = pe.Node(interface=niu.Function(
-        input_names=['input_images', 'in_dict'], output_names=['parameters_file'],
+        input_names=['input_images', 'in_dict'], output_names=['unwarp_param', 'warp_param'],
         function=create_encoding_file), name='TopUp_encfile', updatehash=True)
 
     fslsplit = pe.Node(fsl.Split(dimension='t'), name='ImageHMCSplit')
+
+    warpref = pe.Node(niu.Function(
+        function=_warp_reference,
+        input_names=['in_file', 'in_fieldmap', 'in_params'],
+        output_names=['out_corrected']),
+        name='TestWarpReference')
 
     # Register the reference of the fieldmap to the reference
     # of the target image (the one that shall be corrected)
@@ -90,7 +96,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
 
     topup_adapt = pe.Node(FieldCoefficients(), name='TopUpCoefficients')
 
-    # Use the least-squares method to correct the dropout of the SBRef images
+    # Use the least-squares method to correct the dropout of the input images
     unwarp = pe.Node(fsl.ApplyTOPUP(method=method, in_index=[1]), name='TopUpApply')
 
     workflow.connect([
@@ -101,6 +107,9 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
         (inputnode, encfile, [('in_file', 'input_images')]),
         (inputnode, fmap2ref, [('fmap_ref', 'moving_image'),
                                ('fmap_mask', 'moving_image_mask')]),
+        (align, warpref, [('ref_vol', 'in_file')]),
+        (inputnode, warpref, [('fmap', 'in_fieldmap')]),
+        (encfile, warpref, [('warp_param', 'in_params')]),
         (align, fmap2ref, [('ref_vol', 'fixed_image'),
                            ('ref_mask', 'fixed_image_mask')]),
         (align, applyxfm, [('ref_vol', 'reference_image')]),
@@ -117,7 +126,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
         (align, unwarp, [('out_file', 'in_files')]),
         (topup_adapt, unwarp, [('out_fieldcoef', 'in_topup_fieldcoef'),
                                ('out_movpar', 'in_topup_movpar')]),
-        (encfile, unwarp, [('parameters_file', 'encoding_file')]),
+        (encfile, unwarp, [('unwarp_param', 'encoding_file')]),
         (unwarp, outputnode, [('out_corrected', 'out_file')])
     ])
 
@@ -179,3 +188,33 @@ def _fix_movpar(in_files):
     out_movpar = '{}_movpar.txt'.format(in_files[0])
     np.savetxt(out_movpar, np.zeros((len(in_files), 6)))
     return out_movpar
+
+
+def _warp_reference(in_file, in_fieldmap, in_params):
+    import numpy as np
+    import nibabel as nb
+    from fmriprep.interfaces.fmap import FieldCoefficients
+    from nipype.interfaces.fsl import ApplyTOPUP
+
+    nrows = np.loadtxt(in_params).shape[0]
+
+    if nrows > 1:
+        nii = nb.load(in_file)
+        merged_inputs = 'inputs.nii.gz'
+        nb.concat_images([nii] * nrows).to_filename(merged_inputs)
+    else:
+        merged_inputs = in_file
+
+    movpar = 'movpar.txt'
+    np.savetxt(movpar, np.zeros((nrows, 6)))
+    coeffs = FieldCoefficients(
+        in_ref=in_file, in_file=in_fieldmap, in_movpar=movpar).run()
+
+    warp = ApplyTOPUP(
+        method='jac', in_index=[1],
+        in_files=merged_inputs,
+        in_topup_fieldcoef=coeffs.outputs.out_fieldcoef,
+        in_topup_movpar=coeffs.outputs.out_movpar,
+        encoding_file=in_params).run()
+
+    return warp.outputs.out_corrected
