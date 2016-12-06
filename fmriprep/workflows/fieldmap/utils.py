@@ -42,7 +42,7 @@ def create_encoding_file(input_images, in_dict):
                                'metadata of file "%s"', fmap)
 
         fmapnii = nb.load(fmap)
-        axcode = nb.aff2axcodes(.affine)[meta_pe[0]]
+        axcode = nb.aff2axcodes(fmapnii.affine)[meta_pe[0]]
         pe_axis = pe_dirs[meta_pe[0]]
         if readout_time is None:
             if eff_echo is None:
