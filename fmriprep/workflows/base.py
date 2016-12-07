@@ -11,7 +11,7 @@ from nipype.pipeline import engine as pe
 from nipype.interfaces import fsl
 
 from fmriprep.interfaces import BIDSDataGrabber
-from fmriprep.utils.misc import collect_bids_data
+from fmriprep.utils.misc import collect_bids_data, get_biggest_epi_file_size_gb
 from fmriprep.workflows import confounds
 
 from fmriprep.workflows.anatomical import t1w_preprocessing
@@ -36,11 +36,19 @@ def base_workflow_enumerator(subject_list, settings):
 
 def base_workflow_generator(subject_id, settings):
     subject_data = collect_bids_data(settings['bids_root'], subject_id)
-    if subject_data['t1w'] != [] and subject_data['sbref'] != []:
+
+    settings["biggest_epi_file_size_gb"] = get_biggest_epi_file_size_gb(subject_data['func'])
+
+    if subject_data['t1w'] == []:
+        raise Exception("No T1w images found for participant %s. All workflows require T1w images."%subject_id)
+
+    if subject_data['sbref'] != [] or settings['workflow_type'] == "ds054":
         return wf_ds054_type(subject_data, settings, name=subject_id)
-    if subject_data['t1w'] != [] and subject_data['sbref'] == []:
+    elif subject_data['sbref'] == [] or settings['workflow_type'] == "ds005":
         return wf_ds005_type(subject_data, settings, name=subject_id)
-    return None
+    else:
+        raise Exception("Could not figure out what kind of workflow to run for this dataset.")
+
 
 
 def wf_ds054_type(subject_data, settings, name='fMRI_prep'):

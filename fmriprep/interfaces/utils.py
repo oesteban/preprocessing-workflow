@@ -2,11 +2,6 @@
 # -*- coding: utf-8 -*-
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-#
-# @Author: oesteban
-# @Date:   2016-06-03 09:35:13
-# @Last Modified by:   oesteban
-# @Last Modified time: 2016-12-06 11:20:49
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import os
@@ -64,3 +59,12 @@ def _tsv_format(translations, rot_angles, fmt='confounds'):
         raise NotImplementedError
 
     return out_file
+
+def nii_concat(in_files):
+    import os
+    from nibabel.funcs import concat_images
+    new_nii = concat_images(in_files, check_affines=False)
+
+    new_nii.to_filename("merged.nii.gz")
+
+    return os.path.abspath("merged.nii.gz")
