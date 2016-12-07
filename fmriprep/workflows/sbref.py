@@ -48,7 +48,7 @@ def sbref_preprocess(name='SBrefPreprocessing', settings=None):
 
     ds_report = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='sbref_bet', out_path_base='report'),
+                            suffix='sbref_bet', out_path_base='reports'),
         name='DS_Report'
     )
 
@@ -128,7 +128,7 @@ def sbref_t1_registration(name='SBrefSpatialNormalization', settings=None):
 
     ds_report = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='sbref_t1_flt_bbr', out_path_base='report'),
+                            suffix='sbref_t1_flt_bbr', out_path_base='reports'),
         name='DS_Report'
     )
 

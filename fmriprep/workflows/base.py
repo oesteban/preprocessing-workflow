@@ -22,11 +22,12 @@ from fmriprep.workflows.epi import (
     epi_mean_t1_registration, epi_mni_transformation)
 
 
-def base_workflow_enumerator(subject_list, settings):
+def base_workflow_enumerator(subject_list, task_id, settings):
     workflow = pe.Workflow(name='workflow_enumerator')
     generated_list = []
     for subject in subject_list:
-        generated_workflow = base_workflow_generator(subject, settings)
+        generated_workflow = base_workflow_generator(subject, task_id=task_id,
+                                                     settings=settings)
         if generated_workflow:
             generated_list.append(generated_workflow)
     workflow.add_nodes(generated_list)
@@ -34,8 +35,8 @@ def base_workflow_enumerator(subject_list, settings):
     return workflow
 
 
-def base_workflow_generator(subject_id, settings):
-    subject_data = collect_bids_data(settings['bids_root'], subject_id)
+def base_workflow_generator(subject_id, task_id, settings):
+    subject_data = collect_bids_data(settings['bids_root'], subject_id, task_id)
 
     settings["biggest_epi_file_size_gb"] = get_biggest_epi_file_size_gb(subject_data['func'])
 
