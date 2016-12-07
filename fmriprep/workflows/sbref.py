@@ -58,59 +58,24 @@ def sbref_preprocess(name='SBrefPreprocessing', settings=None):
                            ('mask_file', 'sbref_unwarped_mask')])
     ])
 
-    # Plot result
-    sbref_corr = pe.Node(
-        niu.Function(
-            input_names=["in_file", "overlay_file", "out_file"],
-            output_names=["out_file"],
-            function=stripped_brain_overlay
-        ),
-        name="SBRefCorr"
-    )
-    sbref_corr.inputs.out_file = "corrected_SBRef.svg"
 
-    sbref_corr_ds = pe.Node(
-        ImageDataSink(base_directory=settings['output_dir']),
-        name='SBRefCorrDS'
-    )
 
-    sbref_stripped_overlay = pe.Node(
-        niu.Function(
-            input_names=["in_file", "overlay_file", "out_file"],
-            output_names=["out_file"],
-            function=stripped_brain_overlay
-        ),
-        name="SbrefStrippedOverlay"
-    )
-    sbref_stripped_overlay.inputs.out_file = "sbref_stripped_overlay.svg"
-
-    sbref_stripped_overlay_ds = pe.Node(
-        ImageDataSink(base_directory=settings['output_dir']),
-        name='SBRefStrippedOverlayDS'
-    )
-
-    datasink = pe.Node(
+    betniids = pe.Node(
         DerivativesDataSink(base_directory=settings['output_dir'],
-                            suffix='sdc'),
-        name='datasink'
+                            suffix='sdc_bet'),
+        name='BETniiDS'
+    )
+    betrptds = pe.Node(
+        DerivativesDataSink(base_directory=settings['output_dir'],
+                            suffix='bet'),
+        name='BETRPTDS'
     )
 
     workflow.connect([
-        (inputnode, datasink, [(('sbref', _first), 'source_file')]),
-        (bet, datasink, [('out_file', 'in_file')]),
-        (mean, sbref_corr, [('out_file', 'overlay_file')]),
-        (inputnode, sbref_corr, [('fmap_mask', 'in_file')]),
-        (mean, sbref_corr_ds, [('out_file', 'overlay_file')]),
-        (inputnode, sbref_corr_ds, [('fmap_mask', 'base_file'),
-                                    (('sbref', _first), 'origin_file')]),
-        (sbref_corr, sbref_corr_ds, [('out_file', 'in_file')]),
-        (mean, sbref_stripped_overlay, [('out_file', 'overlay_file')]),
-        (bet, sbref_stripped_overlay, [('mask_file', 'in_file')]),
-        (inputnode, sbref_stripped_overlay_ds, [(('sbref', _first), 'origin_file')]),
-        (mean, sbref_stripped_overlay_ds, [('out_file', 'overlay_file')]),
-        (bet, sbref_stripped_overlay_ds, [('mask_file', 'base_file')]),
-        (sbref_stripped_overlay, sbref_stripped_overlay_ds, [('out_file', 'in_file')])
-
+        (inputnode, betniids, [(('sbref', _first), 'source_file')]),
+        (inputnode, betrptds, [(('sbref', _first), 'source_file')]),
+        (bet, betniids, [('out_file', 'in_file')]),
+        (bet, betrptds, [('out_report', 'in_file')])
     ])
     return workflow
 
