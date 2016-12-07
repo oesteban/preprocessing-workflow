@@ -17,9 +17,9 @@ from nipype.interfaces import utility as niu
 from niworkflows.interfaces.registration import ANTSRegistrationRPT, ANTSApplyTransformsRPT
 
 from fmriprep.interfaces.bids import ReadSidecarJSON
-from fmriprep.interfaces.fmap import FieldCoefficients
+from fmriprep.interfaces.fmap import FieldCoefficients, GenerateMovParams
+from fmriprep.interfaces.topup import ConformTopupInputs
 from fmriprep.workflows.fieldmap.utils import create_encoding_file
-
 SDC_UNWARP_NAME = 'SDC_unwarp'
 
 
@@ -54,14 +54,6 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
                 'hmc_movpar']), name='inputnode')
     outputnode = pe.Node(niu.IdentityInterface(fields=['out_file']), name='outputnode')
 
-    # Compute movpar file iff we have several images with different
-    # PE directions.
-    align = pe.Node(niu.Function(
-        input_names=['in_files', 'in_movpar'],
-        output_names=['out_file', 'ref_vol', 'ref_mask', 'out_movpar'],
-        function=_multiple_pe_hmc), name='AlignMultiplePE')
-    align.inputs.in_ref = ref_vol
-
     # Read metadata
     meta = pe.MapNode(ReadSidecarJSON(), iterfield=['in_file'], name='metadata')
 
@@ -69,7 +61,11 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
         input_names=['input_images', 'in_dict'], output_names=['unwarp_param', 'warp_param'],
         function=create_encoding_file), name='TopUp_encfile', updatehash=True)
 
-    fslsplit = pe.Node(fsl.Split(dimension='t'), name='ImageHMCSplit')
+    # Compute movpar file iff we have several images with different
+    # PE directions.
+    conform = pe.Node(ConformTopupInputs(), name='ConformInputs')
+    if ref_vol is not None:
+        conform.inputs.in_ref = ref_vol
 
     warpref = pe.Node(niu.Function(
         function=_warp_reference,
@@ -90,10 +86,7 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     applyxfm = pe.Node(ANTSApplyTransformsRPT(
         generate_report=True, dimension=3, interpolation='Linear'), name='FMap2ImageFieldmap')
 
-    fix_movpar = pe.Node(niu.Function(
-        input_names=['in_files'], output_names=['out_movpar'],
-        function=_fix_movpar), name='FixMovPar')
-
+    gen_movpar = pe.Node(GenerateMovParams(), name='GenerateMovPar')
     topup_adapt = pe.Node(FieldCoefficients(), name='TopUpCoefficients')
 
     # Use the least-squares method to correct the dropout of the input images
@@ -101,29 +94,29 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
 
     workflow.connect([
         (inputnode, meta, [('in_file', 'in_file')]),
-        (inputnode, align, [('in_file', 'in_files'),
-                            ('hmc_movpar', 'in_movpar')]),
+        (inputnode, conform, [('in_file', 'in_files'),
+                              ('hmc_movpar', 'in_mats')]),
         (inputnode, applyxfm, [('fmap', 'input_image')]),
         (inputnode, encfile, [('in_file', 'input_images')]),
         (inputnode, fmap2ref, [('fmap_ref', 'moving_image'),
                                ('fmap_mask', 'moving_image_mask')]),
-        (align, warpref, [('ref_vol', 'in_file')]),
-        (inputnode, warpref, [('fmap', 'in_fieldmap')]),
-        (encfile, warpref, [('warp_param', 'in_params')]),
-        (align, fmap2ref, [('ref_vol', 'fixed_image'),
+        (inputnode, warpref, [('fmap_ref', 'in_file'),
+                              ('fmap', 'in_fieldmap')]),
+        (encfile, warpref, [('unwarp_param', 'in_params')]),
+        (conform, fmap2ref, [('ref_vol', 'fixed_image'),
                            ('ref_mask', 'fixed_image_mask')]),
-        (align, applyxfm, [('ref_vol', 'reference_image')]),
-        (align, topup_adapt, [('ref_vol', 'in_ref')]),
+        (conform, applyxfm, [('ref_vol', 'reference_image')]),
+        (conform, topup_adapt, [('ref_vol', 'in_ref')]),
         #                      ('out_movpar', 'in_movpar')]),
 
         (meta, encfile, [('out_dict', 'in_dict')]),
 
         (fmap2ref, applyxfm, [('forward_transforms', 'transforms')]),
-        (align, fslsplit, [('out_file', 'in_file')]),
-        (fslsplit, fix_movpar, [('out_files', 'in_files')]),
-        (fix_movpar, topup_adapt, [('out_movpar', 'in_movpar')]),
+        (conform, gen_movpar, [('out_file', 'in_file'),
+                             ('mat_file', 'in_mats')]),
+        (gen_movpar, topup_adapt, [('out_movpar', 'in_movpar')]),
         (applyxfm, topup_adapt, [('output_image', 'in_file')]),
-        (align, unwarp, [('out_file', 'in_files')]),
+        (conform, unwarp, [('out_file', 'in_files')]),
         (topup_adapt, unwarp, [('out_fieldcoef', 'in_topup_fieldcoef'),
                                ('out_movpar', 'in_topup_movpar')]),
         (encfile, unwarp, [('unwarp_param', 'encoding_file')]),
@@ -131,63 +124,6 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     ])
 
     return workflow
-
-
-def _multiple_pe_hmc(in_files, in_movpar, in_ref=None):
-    """
-    This function interprets that we are dealing with a
-    multiple PE (phase encoding) input if it finds several
-    files in in_files.
-
-    If we have several images with various PE directions,
-    it will compute the HMC parameters between them using
-    an embedded workflow.
-
-    It just forwards the two inputs otherwise.
-    """
-    import os
-    from six import string_types
-    from nipype.interfaces import fsl
-    from nipype.interfaces import ants
-    from niworkflows.interfaces.masks import BETRPT
-
-    if isinstance(in_files, string_types):
-        in_files = [in_files]
-
-    if len(in_files) == 1:
-        out_file = in_files[0]
-        out_movpar = in_movpar
-    else:
-        if in_ref is None:
-            in_ref = 0
-
-        # Head motion correction
-        fslmerge = fsl.Merge(dimension='t', in_files=in_files)
-        hmc = fsl.MCFLIRT(ref_vol=in_ref, save_mats=True, save_plots=True)
-        hmc.inputs.in_file = fslmerge.run().outputs.merged_file
-        hmc_res = hmc.run()
-        out_file = hmc_res.outputs.out_file
-        out_movpar = hmc_res.outputs.par_file
-
-    mean = fsl.MeanImage(
-        dimension='T', in_file=out_file)
-    inu = ants.N4BiasFieldCorrection(
-        dimension=3, input_image=mean.run().outputs.out_file)
-    inu_res = inu.run()
-    out_ref = inu_res.outputs.output_image
-    bet = BETRPT(generate_report=True, frac=0.6, mask=True, in_file=out_ref)
-    out_mask = bet.run().outputs.mask_file
-
-    return (out_file, out_ref, out_mask, out_movpar)
-
-
-def _fix_movpar(in_files):
-    import numpy as np
-    # For some reason, MCFLIRT's parameters
-    # are not compatible, fill with zeroes for now
-    out_movpar = '{}_movpar.txt'.format(in_files[0])
-    np.savetxt(out_movpar, np.zeros((len(in_files), 6)))
-    return out_movpar
 
 
 def _warp_reference(in_file, in_fieldmap, in_params):

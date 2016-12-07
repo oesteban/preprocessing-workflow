@@ -20,10 +20,8 @@ from nipype.interfaces import ants
 from niworkflows.interfaces.masks import BETRPT
 from niworkflows.interfaces.registration import FLIRTRPT
 
-from fmriprep.utils.misc import _first, gen_list
-from fmriprep.interfaces.utils import reorient
-from fmriprep.interfaces import (ReadSidecarJSON, IntraModalMerge,
-                                 DerivativesDataSink, ImageDataSink)
+from fmriprep.utils.misc import _first
+from fmriprep.interfaces import (RASReorient, DerivativesDataSink, ImageDataSink)
 from fmriprep.workflows.fieldmap import sdc_unwarp
 from fmriprep.viz import stripped_brain_overlay
 
@@ -135,10 +133,7 @@ def sbref_t1_registration(name='SBrefSpatialNormalization', settings=None):
     )
 
     # Make sure sbref is in RAS coordinates
-    to_ras = pe.Node(niu.Function(input_names=['in_file'],
-                                  output_names=['out_file'],
-                                  function=reorient),
-                     name='SBRefReorient')
+    to_ras = pe.Node(RASReorient(), name='SBRefReorient')
 
     # Extract wm mask from segmentation
     wm_mask = pe.Node(

@@ -6,7 +6,7 @@
 # @Author: oesteban
 # @Date:   2016-06-03 09:35:13
 # @Last Modified by:   oesteban
-# @Last Modified time: 2016-12-05 14:29:30
+# @Last Modified time: 2016-12-06 11:20:49
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import os
@@ -17,51 +17,6 @@ from nipype.interfaces.base import (traits, isdefined, TraitedSpec, BaseInterfac
                                     BaseInterfaceInputSpec, File, InputMultiPath,
                                     OutputMultiPath, Undefined)
 from nipype.interfaces import fsl
-
-class IntraModalMergeInputSpec(BaseInterfaceInputSpec):
-    in_files = InputMultiPath(File(exists=True), mandatory=True,
-                              desc='input files')
-
-class IntraModalMergeOutputSpec(TraitedSpec):
-    out_file = File(exists=True, desc='merged image')
-    out_avg = File(exists=True, desc='average image')
-    out_mats = OutputMultiPath(exists=True, desc='output matrices')
-    out_movpar = OutputMultiPath(exists=True, desc='output movement parameters')
-
-class IntraModalMerge(BaseInterface):
-    input_spec = IntraModalMergeInputSpec
-    output_spec = IntraModalMergeOutputSpec
-
-    def __init__(self, **inputs):
-        self._results = {}
-        super(IntraModalMerge, self).__init__(**inputs)
-
-    def _run_interface(self, runtime):
-        in_files = self.inputs.in_files
-        if len(in_files) == 1:
-            if nb.load(in_files[0]).get_data().ndim < 4:
-                self._results['out_file'] = self.inputs.in_files[0]
-                self._results['out_avg'] = self.inputs.in_files[0]
-                # TODO: generate identity out_mats and zero-filled out_movpar
-                return runtime
-        else:
-            magmrg = fsl.Merge(dimension='t', in_files=self.inputs.in_files)
-            in_files = magmrg.run().outputs.merged_file
-
-        mcflirt = fsl.MCFLIRT(cost='normcorr', save_mats=True, save_plots=True,
-                              ref_vol=0, in_file=in_files[0])
-        mcres = mcflirt.run()
-        self._results['out_mats'] = mcres.outputs.mat_file
-        self._results['out_movpar'] = mcres.outputs.par_file
-        self._results['out_file'] = mcres.outputs.out_file
-
-        mean = fsl.MeanImage(dimension='T', in_file=mcres.outputs.out_file)
-        self._results['out_avg'] = mean.run().outputs.out_file
-        return runtime
-
-    def _list_outputs(self):
-        return self._results
-
 
 
 class FormatHMCParamInputSpec(BaseInterfaceInputSpec):
@@ -109,13 +64,3 @@ def _tsv_format(translations, rot_angles, fmt='confounds'):
         raise NotImplementedError
 
     return out_file
-
-
-def reorient(in_file):
-    import os
-    import nibabel as nb
-
-    _, outfile = os.path.split(in_file)
-    nii = nb.as_closest_canonical(nb.load(in_file))
-    nii.to_filename(outfile)
-    return os.path.abspath(outfile)

@@ -16,6 +16,7 @@ import os
 import os.path as op
 from shutil import copy
 
+import numpy as np
 import nibabel as nb
 from nipype import logging
 from nipype.interfaces.base import (
@@ -27,6 +28,87 @@ from fmriprep.interfaces.bids import _splitext
 from fmriprep.utils.misc import make_folder
 
 LOGGER = logging.getLogger('interface')
+
+
+class IntraModalMergeInputSpec(BaseInterfaceInputSpec):
+    in_files = InputMultiPath(File(exists=True), mandatory=True,
+                              desc='input files')
+    hmc = traits.Bool(True, usedefault=True)
+    zero_based_avg = traits.Bool(True, usedefault=True)
+    to_ras = traits.Bool(True, usedefault=True)
+
+
+class IntraModalMergeOutputSpec(TraitedSpec):
+    out_file = File(exists=True, desc='merged image')
+    out_avg = File(exists=True, desc='average image')
+    out_mats = OutputMultiPath(exists=True, desc='output matrices')
+    out_movpar = OutputMultiPath(exists=True, desc='output movement parameters')
+
+class IntraModalMerge(BaseInterface):
+    input_spec = IntraModalMergeInputSpec
+    output_spec = IntraModalMergeOutputSpec
+
+    def __init__(self, **inputs):
+        self._results = {}
+        super(IntraModalMerge, self).__init__(**inputs)
+
+    def _list_outputs(self):
+        return self._results
+
+    def _run_interface(self, runtime):
+        from nipype.interfaces import fsl
+        in_files = self.inputs.in_files
+        if not isinstance(in_files, list):
+            in_files = [self.inputs.in_files]
+
+        # Generate output average name early
+        self._results['out_avg'] = genfname(self.inputs.in_files[0],
+                                            suffix='avg')
+
+        if self.inputs.to_ras:
+            in_files = [reorient(inf) for inf in in_files]
+
+        if len(in_files) == 1:
+            filenii = nb.load(in_files[0])
+            filedata = filenii.get_data()
+
+            # magnitude files can have an extra dimension empty
+            if filedata.ndim == 5:
+                sqdata = np.squeeze(filedata)
+                if sqdata.ndim == 5:
+                    raise RuntimeError('Input image (%s) is 5D' % in_files[0])
+                else:
+                    in_files = [genfname(in_files[0], suffix='squeezed')]
+                    nb.Nifti1Image(sqdata, filenii.get_affine(),
+                                   filenii.get_header()).to_filename(in_files[0])
+
+            if np.squeeze(nb.load(in_files[0]).get_data()).ndim < 4:
+                self._results['out_file'] = in_files[0]
+                self._results['out_avg'] = in_files[0]
+                # TODO: generate identity out_mats and zero-filled out_movpar
+                return runtime
+            in_files = in_files[0]
+        else:
+            magmrg = fsl.Merge(dimension='t', in_files=self.inputs.in_files)
+            in_files = magmrg.run().outputs.merged_file
+        mcflirt = fsl.MCFLIRT(cost='normcorr', save_mats=True, save_plots=True,
+                              ref_vol=0, in_file=in_files)
+        mcres = mcflirt.run()
+        self._results['out_mats'] = mcres.outputs.mat_file
+        self._results['out_movpar'] = mcres.outputs.par_file
+        self._results['out_file'] = mcres.outputs.out_file
+
+        hmcnii = nb.load(mcres.outputs.out_file)
+        hmcdat = hmcnii.get_data().mean(axis=3)
+        if self.inputs.zero_based_avg:
+            hmcdat -= hmcdat.min()
+
+        nb.Nifti1Image(
+            hmcdat, hmcnii.get_affine(), hmcnii.get_header()).to_filename(
+            self._results['out_avg'])
+
+        return runtime
+
 
 class ImageDataSinkInputSpec(BaseInterfaceInputSpec):
     base_directory = traits.Directory(
@@ -47,6 +129,9 @@ class ImageDataSink(BaseInterface):
     def __init__(self, **inputs):
         self._results = {'out_file': []}
         super(ImageDataSink, self).__init__(**inputs)
+
+    def _list_outputs(self):
+        return self._results
 
     def _run_interface(self, runtime):
         origin_fname, _ = _splitext(self.inputs.origin_file)
@@ -99,8 +184,6 @@ class ImageDataSink(BaseInterface):
 
         return runtime
 
-    def _list_outputs(self):
-        return self._results
 
 
 class CopyHeaderInputSpec(BaseInterfaceInputSpec):
@@ -136,3 +219,61 @@ class CopyHeader(BaseInterface):
         nb.Nifti1Image(data, aff, hdr).to_filename(out_name)
         self._results['out_file'] = out_name
         return runtime
+
+
+class RASReorientInputSpec(BaseInterfaceInputSpec):
+    in_file = File(exists=True, mandatory=True, desc='the input file')
+
+class RASReorientOutputSpec(TraitedSpec):
+    out_file = OutputMultiPath(File(exists=True, desc='written file path'))
+
+class RASReorient(BaseInterface):
+    input_spec = RASReorientInputSpec
+    output_spec = RASReorientOutputSpec
+
+    def __init__(self, **inputs):
+        self._results = {}
+        super(RASReorient, self).__init__(**inputs)
+
+    def _list_outputs(self):
+        return self._results
+
+    def _run_interface(self, runtime):
+        self._results['out_file'] = reorient(self.inputs.in_file)
+        return runtime
+
+
+
+def reorient(in_file, out_file=None):
+    import os
+    import nibabel as nb
+
+    if out_file is None:
+        out_file = genfname(in_file, suffix='ras')
+    nii = nb.as_closest_canonical(nb.load(in_file))
+    nii.to_filename(out_file)
+    return out_file
+
+
+def genfname(in_file, suffix=None, path=None, ext=None):
+    from os import getcwd
+    import os.path as op
+
+    fname, fext = op.splitext(op.basename(in_file))
+    if fext == '.gz':
+        fname, fext2 = op.splitext(fname)
+        fext = fext2 + fext
+
+    if path is None:
+        path = getcwd()
+
+    if ext is None:
+        ext = fext
+
+    if ext.startswith('.'):
+        ext = ext[1:]
+
+    if suffix is None:
+        suffix = 'mod'
+
+    return op.join(path, '{}_{}.{}'.format(fname, suffix, ext))

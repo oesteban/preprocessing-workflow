@@ -49,14 +49,15 @@ def fmap_workflow(name=WORKFLOW_NAME):
     # Merge input magnitude images
     magmrg = pe.Node(IntraModalMerge(), name='MagnitudeFuse')
     # Merge input fieldmap images
-    fmapmrg = pe.Node(IntraModalMerge(), name='FieldmapFuse')
+    fmapmrg = pe.Node(IntraModalMerge(zero_based_avg=False, hmc=False),
+                      name='FieldmapFuse')
 
     # de-gradient the fields ("bias/illumination artifact")
     n4 = pe.Node(ants.N4BiasFieldCorrection(dimension=3), name='MagnitudeBias')
     cphdr = pe.Node(CopyHeader(), name='FixHDR')
     bet = pe.Node(BETRPT(generate_report=True, frac=0.6, mask=True),
                   name='MagnitudeBET')
-    fmapenh = pe.Node(FieldEnhance(), name='FieldmapMassage')
+    fmapenh = pe.Node(FieldEnhance(mask_dilate=2), name='FieldmapMassage')
 
     workflow.connect([
         (inputnode, sortfmaps, [('input_images', 'input_images')]),
