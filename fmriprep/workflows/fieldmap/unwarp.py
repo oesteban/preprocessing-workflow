@@ -57,20 +57,19 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     # Read metadata
     meta = pe.MapNode(ReadSidecarJSON(), iterfield=['in_file'], name='metadata')
 
-    encfile = pe.Node(interface=niu.Function(
-        input_names=['input_images', 'in_dict'], output_names=['unwarp_param', 'warp_param'],
-        function=create_encoding_file), name='TopUp_encfile', updatehash=True)
-
     # Compute movpar file iff we have several images with different
     # PE directions.
     conform = pe.Node(ConformTopupInputs(), name='ConformInputs')
     if ref_vol is not None:
         conform.inputs.in_ref = ref_vol
 
+    torads = pe.Node(niu.Function(input_names=['in_file'], output_names=['out_file'],
+                     function=hz2rads), name='Hz2rads')
+
     warpref = pe.Node(niu.Function(
         function=_warp_reference,
-        input_names=['in_file', 'in_fieldmap', 'in_params'],
-        output_names=['out_corrected']),
+        input_names=['in_file', 'in_fieldmap', 'metadata'],
+        output_names=['out_warped1', 'out_warped2']),
         name='TestWarpReference')
 
     # Register the reference of the fieldmap to the reference
@@ -86,71 +85,119 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     applyxfm = pe.Node(ANTSApplyTransformsRPT(
         generate_report=True, dimension=3, interpolation='Linear'), name='FMap2ImageFieldmap')
 
-    gen_movpar = pe.Node(GenerateMovParams(), name='GenerateMovPar')
-    topup_adapt = pe.Node(FieldCoefficients(), name='TopUpCoefficients')
-
-    # Use the least-squares method to correct the dropout of the input images
-    unwarp = pe.Node(fsl.ApplyTOPUP(method=method, in_index=[1]), name='TopUpApply')
+    unwarp = pe.Node(niu.Function(input_names=['in_file', 'in_fieldmap', 'metadata'],
+                     output_names=['out_file'], function=_fugue_unwarp), name='FUGUE')
 
     workflow.connect([
+        (inputnode, torads, [('fmap', 'in_file')]),
         (inputnode, meta, [('in_file', 'in_file')]),
         (inputnode, conform, [('in_file', 'in_files'),
                               ('hmc_movpar', 'in_mats')]),
-        (inputnode, applyxfm, [('fmap', 'input_image')]),
-        (inputnode, encfile, [('in_file', 'input_images')]),
+        (inputnode, warpref, [('fmap_ref', 'in_file')]),
         (inputnode, fmap2ref, [('fmap_ref', 'moving_image'),
                                ('fmap_mask', 'moving_image_mask')]),
-        (inputnode, warpref, [('fmap_ref', 'in_file'),
-                              ('fmap', 'in_fieldmap')]),
-        (encfile, warpref, [('unwarp_param', 'in_params')]),
-        (conform, fmap2ref, [('ref_vol', 'fixed_image'),
-                           ('ref_mask', 'fixed_image_mask')]),
-        (conform, applyxfm, [('ref_vol', 'reference_image')]),
-        (conform, topup_adapt, [('ref_vol', 'in_ref')]),
-        #                      ('out_movpar', 'in_movpar')]),
-
-        (meta, encfile, [('out_dict', 'in_dict')]),
-
-        (fmap2ref, applyxfm, [('forward_transforms', 'transforms')]),
-        (conform, gen_movpar, [('out_file', 'in_file'),
-                             ('mat_file', 'in_mats')]),
-        (gen_movpar, topup_adapt, [('out_movpar', 'in_movpar')]),
-        (applyxfm, topup_adapt, [('output_image', 'in_file')]),
-        (conform, unwarp, [('out_file', 'in_files')]),
-        (topup_adapt, unwarp, [('out_fieldcoef', 'in_topup_fieldcoef'),
-                               ('out_movpar', 'in_topup_movpar')]),
-        (encfile, unwarp, [('unwarp_param', 'encoding_file')]),
-        (unwarp, outputnode, [('out_corrected', 'out_file')])
+        (conform, fmap2ref, [('out_brain', 'fixed_image'),
+                             ('out_mask', 'fixed_image_mask')]),
+        (conform, applyxfm, [('out_brain', 'reference_image')]),
+        (fmap2ref, applyxfm, [
+            ('forward_transforms', 'transforms'),
+            ('forward_invert_flags', 'invert_transform_flags')]),
+        (torads, applyxfm, [('out_file', 'input_image')]),
+        (torads, warpref, [('out_file', 'in_fieldmap')]),
+        (meta, warpref, [('out_dict', 'metadata')]),
+        (conform, unwarp, [('out_file', 'in_file')]),
+        (applyxfm, unwarp, [('output_image', 'in_fieldmap')]),
+        (meta, unwarp, [('out_dict', 'metadata')]),
+        (unwarp, outputnode, [('out_file', 'out_file')])
     ])
+
+    # Disable ApplyTOPUP for now
+    # encfile = pe.Node(interface=niu.Function(
+    #     input_names=['input_images', 'in_dict'], output_names=['unwarp_param', 'warp_param'],
+    #     function=create_encoding_file), name='TopUp_encfile', updatehash=True)
+    # gen_movpar = pe.Node(GenerateMovParams(), name='GenerateMovPar')
+    # topup_adapt = pe.Node(FieldCoefficients(), name='TopUpCoefficients')
+    # # Use the least-squares method to correct the dropout of the input images
+    # unwarp = pe.Node(fsl.ApplyTOPUP(method=method, in_index=[1]), name='TopUpApply')
+    # workflow.connect([
+    #     (inputnode, encfile, [('in_file', 'input_images')]),
+    #     (meta, encfile, [('out_dict', 'in_dict')]),
+    #     (conform, gen_movpar, [('out_file', 'in_file'),
+    #                            ('out_movpar', 'in_mats')]),
+    #     (conform, topup_adapt, [('out_brain', 'in_ref')]),
+    #     #                       ('out_movpar', 'in_movpar')]),
+    #     (gen_movpar, topup_adapt, [('out_movpar', 'in_movpar')]),
+    #     (applyxfm, topup_adapt, [('output_image', 'in_file')]),
+    #     (conform, unwarp, [('out_file', 'in_files')]),
+    #     (topup_adapt, unwarp, [('out_fieldcoef', 'in_topup_fieldcoef'),
+    #                            ('out_movpar', 'in_topup_movpar')]),
+    #     (encfile, unwarp, [('unwarp_param', 'encoding_file')]),
+    #     (unwarp, outputnode, [('out_corrected', 'out_file')])
+    # ])
 
     return workflow
 
+def hz2rads(in_file, out_file=None):
+    """Transform a fieldmap in Hz into rad/s"""
+    from math import pi
+    import nibabel as nb
+    from fmriprep.utils.misc import genfname
+    if out_file is None:
+        out_file = genfname(in_file, 'rads')
+    nii = nb.load(in_file)
+    data = nii.get_data() / (2.0 * pi)
+    nb.Nifti1Image(data, nii.get_affine(),
+                   nii.get_header()).to_filename(out_file)
+    return out_file
 
-def _warp_reference(in_file, in_fieldmap, in_params):
+def _fugue_unwarp(in_file, in_fieldmap, metadata):
+    import nibabel as nb
+    from nipype.interfaces.fsl import FUGUE
+    from fmriprep.utils.misc import genfname
+
+    nii = nb.load(in_file)
+    if nii.get_data().ndim == 4:
+        nii_list = nb.four_to_three(nii)
+    else:
+        nii_list = [nii]
+
+    if not isinstance(metadata, list):
+        metadata = [metadata]
+
+    if len(metadata) == 1:
+        metadata = metadata * len(nii_list)
+
+    out_files = []
+    for i, (tnii, tmeta) in enumerate(zip(nii_list, metadata)):
+        tfile = genfname(in_file, 'vol%03d' % i)
+        tnii.to_filename(tfile)
+        ec = tmeta['TotalReadoutTime']
+        ud = tmeta['PhaseEncodingDirection'].replace('j', 'y')
+        fugue = FUGUE(
+            in_file=tfile, fmap_in_file=in_fieldmap, nokspace=True,
+            dwell_time=ec, unwarp_direction=ud,
+            unwarped_file=genfname(in_file, 'unwarped%03d' % i)).run()
+        out_files.append(fugue.outputs.unwarped_file)
+
+    corr_nii = nb.concat_images([nb.load(f) for f in out_files])
+    out_file = genfname(in_file, 'unwarped')
+    corr_nii.to_filename(out_file)
+    return out_file
+
+
+def _warp_reference(in_file, in_fieldmap, metadata):
     import numpy as np
     import nibabel as nb
-    from fmriprep.interfaces.fmap import FieldCoefficients
-    from nipype.interfaces.fsl import ApplyTOPUP
+    from nipype.interfaces.fsl import FUGUE
 
-    nrows = np.loadtxt(in_params).shape[0]
+    if isinstance(metadata, (list, tuple)):
+        metadata = metadata[0]
+    ec = metadata['TotalReadoutTime']
 
-    if nrows > 1:
-        nii = nb.load(in_file)
-        merged_inputs = 'inputs.nii.gz'
-        nb.concat_images([nii] * nrows).to_filename(merged_inputs)
-    else:
-        merged_inputs = in_file
-
-    movpar = 'movpar.txt'
-    np.savetxt(movpar, np.zeros((nrows, 6)))
-    coeffs = FieldCoefficients(
-        in_ref=in_file, in_file=in_fieldmap, in_movpar=movpar).run()
-
-    warp = ApplyTOPUP(
-        method='jac', in_index=[1],
-        in_files=merged_inputs,
-        in_topup_fieldcoef=coeffs.outputs.out_fieldcoef,
-        in_topup_movpar=coeffs.outputs.out_movpar,
-        encoding_file=in_params).run()
-
-    return warp.outputs.out_corrected
+    fugue = FUGUE(in_file=in_file, fmap_in_file=in_fieldmap, nokspace=True,
+                  forward_warping=True, dwell_time=ec, unwarp_direction='y-',
+                  warped_file='warped-y-.nii.gz').run()
+    fugue2 = FUGUE(in_file=in_file, fmap_in_file=in_fieldmap, nokspace=True,
+                   forward_warping=True, dwell_time=ec, unwarp_direction='y',
+                   warped_file='warped-y.nii.gz').run()
+    return fugue.outputs.warped_file, fugue2.outputs.warped_file

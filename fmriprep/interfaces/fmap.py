@@ -17,7 +17,7 @@ from nipype import logging
 from nipype.interfaces.base import (BaseInterface, BaseInterfaceInputSpec, TraitedSpec,
                                     File, isdefined, traits, InputMultiPath)
 from nipype.interfaces import fsl
-from .images import genfname
+from fmriprep.utils.misc import genfname
 
 LOGGER = logging.getLogger('interfaces')
 

@@ -415,7 +415,6 @@ def epi_unwarp(name='EPIUnwarpWorkflow', settings=None):
     )
 
     unwarp = sdc_unwarp(testing=settings.get('debug', False))
-    unwarp.inputs.inputnode.hmc_movpar = ''
 
     # Compute outputs
     mean = pe.Node(fsl.MeanImage(dimension='T'), name='EPImean')

@@ -25,7 +25,7 @@ from nipype.interfaces.base import (
 )
 
 from fmriprep.interfaces.bids import _splitext
-from fmriprep.utils.misc import make_folder
+from fmriprep.utils.misc import make_folder, genfname
 
 LOGGER = logging.getLogger('interface')
 
@@ -243,37 +243,16 @@ class RASReorient(BaseInterface):
         return runtime
 
 
-
 def reorient(in_file, out_file=None):
-    import os
     import nibabel as nb
+    from fmriprep.utils.misc import genfname
+    from builtins import (str, bytes)
 
     if out_file is None:
         out_file = genfname(in_file, suffix='ras')
-    nii = nb.as_closest_canonical(nb.load(in_file))
+
+    if isinstance(in_file, (str, bytes)):
+        nii = nb.load(in_file)
+    nii = nb.as_closest_canonical(nii)
     nii.to_filename(out_file)
     return out_file
-
-
-def genfname(in_file, suffix=None, path=None, ext=None):
-    from os import getcwd
-    import os.path as op
-
-    fname, fext = op.splitext(op.basename(in_file))
-    if fext == '.gz':
-        fname, fext2 = op.splitext(fname)
-        fext = fext2 + fext
-
-    if path is None:
-        path = getcwd()
-
-    if ext is None:
-        ext = fext
-
-    if ext.startswith('.'):
-        ext = ext[1:]
-
-    if suffix is None:
-        suffix = 'mod'
-
-    return op.join(path, '{}_{}.{}'.format(fname, suffix, ext))

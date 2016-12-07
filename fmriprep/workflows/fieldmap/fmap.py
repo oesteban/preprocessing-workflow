@@ -57,7 +57,7 @@ def fmap_workflow(name=WORKFLOW_NAME):
     cphdr = pe.Node(CopyHeader(), name='FixHDR')
     bet = pe.Node(BETRPT(generate_report=True, frac=0.6, mask=True),
                   name='MagnitudeBET')
-    fmapenh = pe.Node(FieldEnhance(mask_dilate=2), name='FieldmapMassage')
+    fmapenh = pe.Node(FieldEnhance(mask_dilate=0), name='FieldmapMassage')
 
     workflow.connect([
         (inputnode, sortfmaps, [('input_images', 'input_images')]),
@@ -71,7 +71,7 @@ def fmap_workflow(name=WORKFLOW_NAME):
         (bet, fmapenh, [('mask_file', 'in_mask')]),
         (fmapenh, outputnode, [('out_file', 'fmap')]),
         (bet, outputnode, [('mask_file', 'fmap_mask')]),
-        (cphdr, outputnode, [('out_file', 'fmap_ref')])
+        (bet, outputnode, [('out_file', 'fmap_ref')])
     ])
     return workflow
 
