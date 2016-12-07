@@ -36,6 +36,9 @@ def genfname(in_file, suffix=None, path=None, ext=None):
     return op.join(path, '{}_{}.{}'.format(fname, suffix, ext))
 
 def _first(inlist):
+    if not isinstance(inlist, (list, tuple)):
+        inlist = [inlist]
+
     return sorted(inlist)[0]
 
 def make_folder(folder):
