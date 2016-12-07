@@ -72,8 +72,8 @@ class TestFieldMap(TestWorkflow):
     def test_create_encoding_file(self, mock_savetxt, mock_load):
         # SET UP INPUTS
         fieldmaps = 'some_file.nii.gz'
-        in_dict = { 'TotalReadoutTime': 'a_time',
-                    'PhaseEncodingDirection': ['i']
+        in_dict = { 'TotalReadoutTime': 1.0,
+                    'PhaseEncodingDirection': 'i'
         }
 
         # SET UP EXPECTATIONS
