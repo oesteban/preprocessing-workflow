@@ -24,6 +24,39 @@ from .images import reorient
 
 LOGGER = logging.getLogger('interface')
 
+class TopupInputsInputSpec(BaseInterfaceInputSpec):
+    in_files = InputMultiPath(File(exists=True), mandatory=True,
+                              desc='input files')
+    in_mats = InputMultiPath(File(exists=True), desc='input files')
+    in_ref = traits.Int(-1, usedefault=True, desc='reference volume')
+
+
+class TopupInputsOutputSpec(TraitedSpec):
+    out_file = File(exists=True, desc='merged image')
+    out_reference = File(exists=True, desc='reference image')
+    out_mask = File(exists=True, desc='out mask')
+    out_brain = File(exists=True, desc='reference image, masked')
+    out_movpar = File(exists=True, desc='output movement parameters')
+
+class TopupInputs(BaseInterface):
+
+    """
+
+    """
+    input_spec = TopupInputsInputSpec
+    output_spec = TopupInputsOutputSpec
+
+    def __init__(self, **inputs):
+        self._results = {}
+        super(TopupInputs, self).__init__(**inputs)
+
+    def _list_outputs(self):
+        return self._results
+
+    def _run_interface(self, runtime):
+
+        return runtime
+
 class ConformTopupInputsInputSpec(BaseInterfaceInputSpec):
     in_files = InputMultiPath(File(exists=True), mandatory=True,
                               desc='input files')

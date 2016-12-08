@@ -29,9 +29,9 @@ def fmap_estimator(subject_data, settings=None):
     This workflow selects the fieldmap estimation data available for the subject and
     returns the estimated fieldmap in Hz, along with a corresponding reference image.
 
-    All estimation workflows must produce three outputs:
+    Any estimation workflow must produce three outputs:
 
-      * fmap: The estimated fieldmap itself
+      * fmap: The estimated fieldmap itself IN UNITS OF Hz.
       * fmap_ref: the anatomical reference for the fieldmap (magnitude image, corrected SEm, etc.)
       * fmap_mask: a brain mask for the fieldmap
 
@@ -66,15 +66,24 @@ def fmap_estimator(subject_data, settings=None):
 
     if any(['epi' in fname for fname in subject_data['fmap']]):
         LOGGER.info('Fieldmap estimation: phase-encoding images found')
-        # from .pepolar import pepolar_workflow
-        # pewf = pepolar_workflow()
+        from .pepolar import pepolar_workflow
+        pewf = pepolar_workflow(settings=settings)
         # set inputs
-        # phdif.inputs.inputnode.input_images
-        # estimator_wfs.append(pewf)
+        pewf.inputs.inputnode.input_images = subject_data['fmap'] + subject_data['sbref']
+        estimator_wfs.append(pewf)
 
     if len(estimator_wfs) > 1:
+        LOGGER.warn('Averaging fieldmap estimators is not yet implemented')
         # Average estimated workflows (requires registration)
-        raise NotImplementedError
+        mrgfmaps = pe.Node(niu.Merge(len(estimator_wfs)), name='MergeFMaps')
+        for i, est in enumerate(estimator_wfs):
+            workflow.connect(est, 'outputnode.fmap', mrgfmaps, 'in%d' % (i+1))
+        workflow.connect([
+            (estimator_wfs[0], outputnode, [
+                ('outputnode.fmap', 'fmap'),
+                ('outputnode.fmap_ref', 'fmap_ref'),
+                ('outputnode.fmap_mask', 'fmap_mask')])
+        ])
     else:
         workflow.connect([
             (estimator_wfs[0], outputnode, [
@@ -82,6 +91,5 @@ def fmap_estimator(subject_data, settings=None):
                 ('outputnode.fmap_ref', 'fmap_ref'),
                 ('outputnode.fmap_mask', 'fmap_mask')])
         ])
-
 
     return workflow

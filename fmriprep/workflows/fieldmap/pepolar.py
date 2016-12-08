@@ -26,6 +26,7 @@ from niworkflows.interfaces.masks import BETRPT
 
 from fmriprep.utils.misc import _first, gen_list
 from fmriprep.interfaces import ImageDataSink, ReadSidecarJSON
+from fmriprep.interfaces.topup import ConformTopupInputs
 from fmriprep.viz import stripped_brain_overlay
 from fmriprep.workflows.fieldmap.utils import create_encoding_file
 
@@ -57,18 +58,18 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     outputnode = pe.Node(niu.IdentityInterface(
         fields=['fmap', 'fmap_mask', 'fmap_ref']), name='outputnode')
 
+    sortfmaps = pe.Node(niu.Function(function=_sort_fmaps,
+                                     input_names=['input_images'],
+                                     output_names=['pedir1', 'pedir2', 'pedir3', 'pedir4']),
+                        name='SortFmaps')
+
     # Read metadata
-    meta = pe.MapNode(ReadSidecarJSON(fields=['TotalReadoutTime', 'PhaseEncodingDirection']),
-                      iterfield=['in_file'], name='metadata')
+    meta = pe.MapNode(ReadSidecarJSON(), iterfield=['in_file'], name='metadata')
+    conform = pe.Node(ConformTopupInputs(), name='ConformInputs')
 
     encfile = pe.Node(interface=niu.Function(
         input_names=['input_images', 'in_dict'], output_names=['parameters_file', 'discard'],
         function=create_encoding_file), name='TopUp_encfile', updatehash=True)
-
-    # Head motion correction
-    fslmerge = pe.Node(fsl.Merge(dimension='t'), name='SE_merge')
-    hmc_se = pe.Node(fsl.MCFLIRT(cost='normcorr', mean_vol=True), name='SE_head_motion_corr')
-    fslsplit = pe.Node(fsl.Split(dimension='t'), name='SE_split')
 
     # Run topup to estimate field distortions, do not estimate movement
     # since it is done in hmc_se
@@ -84,19 +85,17 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     mag_bet = pe.Node(BETRPT(mask=True, robust=True), name='SE_brain')
 
     workflow.connect([
-        (inputnode, meta, [('input_images', 'in_file')]),
-        (inputnode, encfile, [('input_images', 'input_images')]),
-        (inputnode, fslmerge, [('input_images', 'in_files')]),
-        (fslmerge, hmc_se, [('merged_file', 'in_file')]),
+        (inputnode, sortfmaps, [('input_images', 'input_images')]),
+        (sortfmaps, meta, [('pe_variations', 'in_file')]),
+        (sortfmaps, conform, [('pe_variations', 'in_files')]),
+        (sortfmaps, encfile, [('pe_variations', 'input_images')]),
         (meta, encfile, [('out_dict', 'in_dict')]),
         (encfile, topup, [('parameters_file', 'encoding_file')]),
-        (hmc_se, topup, [('out_file', 'in_file')]),
+        (conform, topup, [('out_file', 'in_file')]),
         (topup, unwarp_mag, [('out_fieldcoef', 'in_topup_fieldcoef'),
                              ('out_movpar', 'in_topup_movpar')]),
         (encfile, unwarp_mag, [('parameters_file', 'encoding_file')]),
-        (hmc_se, fslsplit, [('out_file', 'in_file')]),
-        (fslsplit, unwarp_mag, [('out_files', 'in_files'),
-                                (('out_files', gen_list), 'in_index')]),
+        (conform, unwarp_mag, [('out_file', 'in_files')]),
         (unwarp_mag, inu_n4, [('out_corrected', 'input_image')]),
         (inu_n4, mag_bet, [('output_image', 'in_file')]),
 
@@ -126,3 +125,8 @@ def pepolar_workflow(name=WORKFLOW_NAME, settings=None):
     ])
 
     return workflow
+
+def _sort_fmaps(input_images):
+    ''' just a little data massaging'''
+    return (sorted([fname for fname in input_images if 'epi' in fname] +
+                   sorted([fname for fname in input_images if 'sbref' in fname])))
