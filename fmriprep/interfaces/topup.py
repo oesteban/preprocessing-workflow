@@ -11,36 +11,48 @@ TopUp helpers
 from __future__ import print_function, division, absolute_import, unicode_literals
 import numpy as np
 import nibabel as nb
-from nilearn.image import mean_img
+from nilearn.image import mean_img, concat_imgs
+from nilearn.masking import (compute_epi_mask,
+                             apply_mask)
 from nipype import logging
 from nipype.interfaces.ants import N4BiasFieldCorrection
 from nipype.interfaces import fsl
 from nipype.interfaces.base import (
     traits, isdefined, TraitedSpec, BaseInterface, BaseInterfaceInputSpec,
-    File, InputMultiPath, traits
+    File, InputMultiPath, traits, OutputMultiPath
 )
 from fmriprep.utils.misc import genfname
 from .images import reorient
+from .bids import get_metadata_for_nifti
 
 LOGGER = logging.getLogger('interface')
 
 class TopupInputsInputSpec(BaseInterfaceInputSpec):
-    in_files = InputMultiPath(File(exists=True), mandatory=True,
-                              desc='input files')
-    in_mats = InputMultiPath(File(exists=True), desc='input files')
-    in_ref = traits.Int(-1, usedefault=True, desc='reference volume')
-
+    in_files = InputMultiPath(File(exists=True),
+                              desc='input file for topup field estimation')
+    to_ras = traits.Bool(True, usedefault=True,
+                         desc='reorient all input images to RAS')
+    mask_inputs = traits.Bool(True, usedefault=True,
+                              desc='do mask of inputs')
 
 class TopupInputsOutputSpec(TraitedSpec):
-    out_file = File(exists=True, desc='merged image')
-    out_reference = File(exists=True, desc='reference image')
-    out_mask = File(exists=True, desc='out mask')
-    out_brain = File(exists=True, desc='reference image, masked')
-    out_movpar = File(exists=True, desc='output movement parameters')
+    enc_file = File(exists=True,
+                    desc='the topup encoding parameters file corresponding to'
+                         '  the inputs')
+    out_file = File(exists=True,
+                    desc='all input files in a single 4D volume')
+    out_files = OutputMultiPath(File(exists=True),
+                                desc='input files as a list')
+
 
 class TopupInputs(BaseInterface):
 
     """
+    This interface generates the input files required by FSL topup:
+
+      * A 4D file with all input images
+      * The topup-encoding parameters file corresponding to the 4D file.
+
 
     """
     input_spec = TopupInputsInputSpec
@@ -54,6 +66,66 @@ class TopupInputs(BaseInterface):
         return self._results
 
     def _run_interface(self, runtime):
+
+        in_files = [fname for fname in self.inputs.in_files
+                    if 'epi' in fname or 'sbref' in fname]
+
+        self._results['enc_file'] = genfname(in_files[0], suffix='encfile', ext='txt')
+        self._results['out_file'] = genfname(in_files[0], suffix='datain')
+
+        # Check input files.
+        if not isinstance(in_files, (list, tuple)):
+            raise RuntimeError('in_files should be a list of files')
+        if len(in_files) < 2:
+            raise RuntimeError('in_files should be a list of 2 or more input files')
+
+        # Check metadata of inputs and retrieve the pe dir and ro time.
+        pe_params = []
+        for fname in in_files:
+            line = [0.0] * 4
+            pe_dir, line[3] = get_pe_params(fname)
+            line[int(abs(pe_dir))] = 1.0 if pe_dir > 0.0 else -1.0
+
+            # check number of images in dataset
+            ntsteps = 1
+            nii = nb.squeeze_image(nb.load(fname))
+            if len(nii.shape) == 4:
+                ntsteps = nii.shape[-1]
+
+            pe_params += [line] * ntsteps
+
+        np.savetxt(self._results['enc_file'], pe_params,
+                   fmt=[b'%0.1f', b'%0.1f', b'%0.1f', b'%0.20f'])
+
+        # to RAS
+        if self.inputs.to_ras:
+            in_files = [reorient(fname) for fname in in_files]
+
+        # split 4D volumes
+        self._results['out_files'] = []
+        for i, fname in enumerate(in_files):
+            nii = nb.load(fname)
+            if len(nii.shape) == 3:
+                self._results['out_files'].append(fname)
+                continue
+
+            nii = nb.squeeze_image(nii)
+            if len(nii.shape) == 3:
+                nii_list = [nii]
+            else:
+                nii_list = nb.four_to_three(nii)
+
+            for j, frame in enumerate(nii_list):
+                newfname = genfname(fname, suffix='sq%02d_%03d' % (i, j))
+                self._results['out_files'].append(newfname)
+                frame.to_filename(newfname)
+
+        if self.inputs.mask_inputs:
+            self._results['out_files'] = [apply_epi_mask(fname)
+                                          for fname in self._results['out_files']]
+        # merge
+        nii = concat_imgs(self._results['out_files'], ensure_ndim=4)
+        nii.to_filename(self._results['out_file'])
 
         return runtime
 
@@ -180,6 +252,80 @@ class ConformTopupInputs(BaseInterface):
         # Generate Encoding file
 
         return runtime
+
+def get_pe_params(in_file):
+    """
+    Checks on the BIDS metadata associated with the file and
+    extracts the two parameters of interest: PE direction and
+    RO time.
+    """
+    meta = get_metadata_for_nifti(in_file)
+
+    # Process PE direction
+    pe_meta = meta.get('PhaseEncodingDirection')
+    if pe_meta is None:
+        raise RuntimeError('PhaseEncodingDirection metadata not found for '
+                           ' %s' % in_file)
+
+    if pe_meta[0] == 'i':
+        pe_dir = 0
+    elif pe_meta[0] == 'j':
+        pe_dir = 1
+    elif pe_meta[0] == 'k':
+        LOGGER.warn('Detected phase-encoding direction perpendicular '
+                    'to the axial plane of the brain.')
+        pe_dir = 2
+
+    if pe_meta.endswith('-'):
+        pe_dir *= -1.0
+
+    # Option 1: we find the RO time label
+    ro_time = meta.get('TotalReadoutTime', None)
+
+    # Option 2: we find the effective echo spacing label
+    eff_ec = meta.get('EffectiveEchoSpacing', None)
+    if ro_time is None and eff_ec is not None:
+        pe_echoes = nb.load(in_file).shape[int(abs(pe_dir))] - 1
+        ro_time = eff_ec * pe_echoes
+
+    # Option 3: we find echo time label
+    ect = meta.get('EchoTime', None)
+    if ro_time is None and ect is not None:
+        LOGGER.warn('Total readout time was estimated from the '
+                    'EchoTime metadata, please be aware that acceleration '
+                    'factors do modify the effective echo time that is '
+                    'necessary for fieldmap correction.')
+        pe_echoes = nb.load(in_file).shape[int(abs(pe_dir))] - 1
+        ro_time = ect * pe_echoes
+
+    # Option 4: using the bandwidth parameter
+    pebw = meta.get('BandwidthPerPixelPhaseEncode', None)
+    if ro_time is None and pebw is not None:
+        LOGGER.warn('Total readout time was estimated from the '
+                    'BandwidthPerPixelPhaseEncode metadata, please be aware '
+                    'that acceleration factors do modify the effective echo '
+                    'time that is necessary for fieldmap correction.')
+        pe_echoes = nb.load(in_file).shape[int(abs(pe_dir))]
+        ro_time = 1.0 / (pebw * pe_echoes)
+
+    if ro_time is None:
+        raise RuntimeError('Readout time could not be set')
+
+    return pe_dir, ro_time
+
+def apply_epi_mask(in_file, mask=None):
+    out_file = genfname(in_file, suffix='brainmask')
+    nii = nb.load(in_file)
+    data = nii.get_data()
+    if mask is None:
+        mask = compute_epi_mask(
+            nii, lower_cutoff=0.05, upper_cutoff=0.95,
+            opening=False, exclude_zeros=True).get_data()
+
+    data[np.where(mask <= 0)] = 0
+    nb.Nifti1Image(data, nii.get_affine(),
+                   nii.get_header()).to_filename(out_file)
+    return out_file
 
 def _generate_topup_movpar(in_mats):
     # TODO!
