@@ -82,6 +82,10 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
     fmap2ref = pe.Node(ANTSRegistrationRPT(from_file=ants_settings, output_warped_image=True,
                        generate_report=True), name='FMap2ImageMagnitude')
 
+
+    fugue = pe.Node(fsl.FUGUE(save_unmasked_fmap=True), name='fugue')
+
+
     applyxfm = pe.Node(ANTSApplyTransformsRPT(
         generate_report=True, dimension=3, interpolation='Linear'), name='FMap2ImageFieldmap')
 
@@ -98,6 +102,8 @@ def sdc_unwarp(name=SDC_UNWARP_NAME, ref_vol=None, method='jac', testing=False):
                                ('fmap_mask', 'moving_image_mask')]),
         (conform, fmap2ref, [('out_brain', 'fixed_image'),
                              ('out_mask', 'fixed_image_mask')]),
+        # (fmapenh, fugue, [('out_file', 'fmap_in_file')]),
+        # (fugue, outputnode, [('fmap_out_file', 'fmap')]),
         (conform, applyxfm, [('out_brain', 'reference_image')]),
         (fmap2ref, applyxfm, [
             ('forward_transforms', 'transforms'),
@@ -152,8 +158,10 @@ def hz2rads(in_file, out_file=None):
 
 def _fugue_unwarp(in_file, in_fieldmap, metadata):
     import nibabel as nb
+    from nipype import logging
     from nipype.interfaces.fsl import FUGUE
     from fmriprep.utils.misc import genfname
+    LOGGER = logging.getLogger('workflows')
 
     nii = nb.load(in_file)
     if nii.get_data().ndim == 4:
@@ -173,11 +181,15 @@ def _fugue_unwarp(in_file, in_fieldmap, metadata):
         tnii.to_filename(tfile)
         ec = tmeta['TotalReadoutTime']
         ud = tmeta['PhaseEncodingDirection'].replace('j', 'y')
+
         fugue = FUGUE(
-            in_file=tfile, fmap_in_file=in_fieldmap, nokspace=True,
-            dwell_time=ec, unwarp_direction=ud,
-            unwarped_file=genfname(in_file, 'unwarped%03d' % i)).run()
-        out_files.append(fugue.outputs.unwarped_file)
+            in_file=tfile, fmap_in_file=in_fieldmap, dwell_time=ec,
+            unwarp_direction=ud, icorr=True,
+            unwarped_file=genfname(in_file, 'unwarped%03d' % i))
+
+        print('Running FUGUE: %s' % fugue.cmdline)
+        fugue_res = fugue.run()
+        out_files.append(fugue_res.outputs.unwarped_file)
 
     corr_nii = nb.concat_images([nb.load(f) for f in out_files])
     out_file = genfname(in_file, 'unwarped')

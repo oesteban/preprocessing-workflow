@@ -96,9 +96,9 @@ class FieldEnhanceInputSpec(BaseInterfaceInputSpec):
     in_file = File(exists=True, mandatory=True, desc='input fieldmap')
     in_mask = File(exists=True, desc='brain mask')
     despike = traits.Bool(True, usedefault=True, desc='run despike filter')
-    bspline_smooth = traits.Bool(True, usedefault=True, desc='run bspline smoother')
-    mask_dilate = traits.Int(1, usedefault=True, desc='mask dilation iterations')
-    despike_threshold = traits.Float(0.2, usedefault=True, desc='mask dilation iterations')
+    bspline_smooth = traits.Bool(True, usedefault=True, desc='run 3D bspline smoother')
+    mask_erode = traits.Int(1, usedefault=True, desc='mask erosion iterations')
+    despike_threshold = traits.Float(0.2, usedefault=True, desc='mask erosion iterations')
 
 
 class FieldEnhanceOutputSpec(TraitedSpec):
@@ -122,7 +122,6 @@ class FieldEnhance(BaseInterface):
 
     def _run_interface(self, runtime):
         from scipy import ndimage as sim
-        from scipy.ndimage.morphology import grey_dilation
 
         fmap_nii = nb.load(self.inputs.in_file)
         data = np.squeeze(fmap_nii.get_data().astype(np.float32))
@@ -137,14 +136,11 @@ class FieldEnhance(BaseInterface):
             mask = masknii.get_data().astype(np.uint8)
 
             # Dilate mask
-            if self.inputs.mask_dilate > 0:
+            if self.inputs.mask_erode > 0:
                 struc = sim.iterate_structure(sim.generate_binary_structure(3, 2), 1)
-                mask = sim.binary_dilation(
+                mask = sim.binary_erosion(
                     mask, struc,
-                    iterations=self.inputs.mask_dilate).astype(np.uint8)  # pylint: disable=no-member
-
-                nb.Nifti1Image(mask, masknii.get_affine(), masknii.get_header()).to_filename(
-                    genfname(self.inputs.in_file, suffix='maskdilated'))
+                    iterations=self.inputs.mask_erode).astype(np.uint8)  # pylint: disable=no-member
 
             # Apply mask
             data[mask == 0] = 0.0
@@ -155,7 +151,7 @@ class FieldEnhance(BaseInterface):
         datanii = nb.Nifti1Image(data, fmap_nii.get_affine(), fmap_nii.get_header())
         # data interpolation
         if self.inputs.bspline_smooth:
-            datanii, coefnii = _approx(datanii, s=10)
+            datanii, coefnii = bspl_smoothing(datanii, masknii)
             coefnii.to_filename(self._results['out_coeff'])
 
         datanii.to_filename(self._results['out_file'])
@@ -192,59 +188,6 @@ def _despike2d(data, thres, neigh=None):
                     data[i, j, k] = patch_med
     return data
 
-
-def _approx(fmapnii, s=14.):
-    """
-    Slice-wise approximation of a smooth 2D bspline
-    credits: http://scipython.com/book/chapter-8-scipy/examples/two-dimensional-interpolation-\
-    with-scipyinterpolaterectbivariatespline/
-
-    """
-    from scipy.interpolate import RectBivariateSpline
-    from builtins import str, bytes
-
-    if isinstance(fmapnii, (str, bytes)):
-        fmapnii = nb.load(fmapnii)
-
-    if not isinstance(s, (tuple, list)):
-        s = np.array([s] * 2)
-
-    data = fmapnii.get_data()
-    zooms = fmapnii.get_header().get_zooms()
-
-    knot_decimate = np.floor(s / np.array(zooms)[:2]).astype(np.uint8)
-    knot_space = np.array(zooms)[:2] * knot_decimate
-
-    xmax = 0.5 * data.shape[0] * zooms[0]
-    ymax = 0.5 * data.shape[1] * zooms[1]
-
-    x = np.arange(-xmax, xmax, knot_space[0])
-    y = np.arange(-ymax, ymax, knot_space[1])
-
-    x2 = np.arange(-xmax, xmax, zooms[0])
-    y2 = np.arange(-ymax, ymax, zooms[1])
-
-    coeffs = []
-    nslices = data.shape[-1]
-    for k in range(nslices):
-        data2d = data[..., k]
-        data2dsubs = data2d[::knot_decimate[0], ::knot_decimate[1]]
-        interp_spline = RectBivariateSpline(x, y, data2dsubs)
-
-        data[..., k] = interp_spline(x2, y2)
-        coeffs.append(interp_spline.get_coeffs().reshape(data2dsubs.shape))
-
-    # Save smoothed data
-    hdr = fmapnii.get_header().copy()
-    caff = fmapnii.get_affine()
-    datanii = nb.Nifti1Image(data.astype(np.float32), caff, hdr)
-
-    # Save bspline coeffs
-    caff[0, 0] = knot_space[0]
-    caff[1, 1] = knot_space[1]
-    coeffnii = nb.Nifti1Image(np.stack(coeffs, axis=2), caff, hdr)
-
-    return datanii, coeffnii
 
 def _gen_coeff(in_file, in_ref, in_movpar=None):
     """Convert to a valid fieldcoeff"""
@@ -301,25 +244,143 @@ def _gen_coeff(in_file, in_ref, in_movpar=None):
 
     return out_fieldcoef, out_movpar
 
-def _3d_approx(fmapnii, s=10.):
+def _approx(fmapnii, s=14.):
     """
-    A 3D BSpline approximation of the fieldmap (WIP)
-    """
+    Slice-wise approximation of a smooth 2D bspline
+    credits: http://scipython.com/book/chapter-8-scipy/examples/two-dimensional-interpolation-\
+    with-scipyinterpolaterectbivariatespline/
 
-    from scipy.interpolate import splprep, splev
+    """
+    from scipy.interpolate import RectBivariateSpline
     from builtins import str, bytes
 
     if isinstance(fmapnii, (str, bytes)):
         fmapnii = nb.load(fmapnii)
 
+    if not isinstance(s, (tuple, list)):
+        s = np.array([s] * 2)
+
     data = fmapnii.get_data()
     zooms = fmapnii.get_header().get_zooms()
 
-    vox_grid = np.argwhere(data < np.inf)
-    ras_grid = np.array(vox_grid) * np.array(zooms)[np.newaxis, :3]
+    knot_decimate = np.floor(s / np.array(zooms)[:2]).astype(np.uint8)
+    knot_space = np.array(zooms)[:2] * knot_decimate
 
-    F = data[data < np.inf]
-    xyzf = np.array([(ras[0], ras[1], ras[2], val)
-                    for ras, val in zip(ras_grid, F)])
-    interp = splprep(xyzf.T, s)
-    return interp
+    xmax = 0.5 * data.shape[0] * zooms[0]
+    ymax = 0.5 * data.shape[1] * zooms[1]
+
+    x = np.arange(-xmax, xmax, knot_space[0])
+    y = np.arange(-ymax, ymax, knot_space[1])
+
+    x2 = np.arange(-xmax, xmax, zooms[0])
+    y2 = np.arange(-ymax, ymax, zooms[1])
+
+    coeffs = []
+    nslices = data.shape[-1]
+    for k in range(nslices):
+        data2d = data[..., k]
+        data2dsubs = data2d[::knot_decimate[0], ::knot_decimate[1]]
+        interp_spline = RectBivariateSpline(x, y, data2dsubs)
+
+        data[..., k] = interp_spline(x2, y2)
+        coeffs.append(interp_spline.get_coeffs().reshape(data2dsubs.shape))
+
+    # Save smoothed data
+    hdr = fmapnii.get_header().copy()
+    caff = fmapnii.get_affine()
+    datanii = nb.Nifti1Image(data.astype(np.float32), caff, hdr)
+
+    # Save bspline coeffs
+    caff[0, 0] = knot_space[0]
+    caff[1, 1] = knot_space[1]
+    coeffnii = nb.Nifti1Image(np.stack(coeffs, axis=2), caff, hdr)
+
+    return datanii, coeffnii
+
+
+def bspl_smoothing(fmapnii, masknii=None, knot_space=[18., 18., 20.]):
+    """
+    A 3D BSpline smoothing of the fieldmap
+    """
+    from datetime import datetime as dt
+    from builtins import str, bytes
+    from scipy.linalg import pinv2
+
+    if not isinstance(knot_space, (list, tuple)):
+        knot_space = [knot_space] * 3
+    knot_space = np.array(knot_space)
+
+    if isinstance(fmapnii, (str, bytes)):
+        fmapnii = nb.load(fmapnii)
+
+    data = fmapnii.get_data()
+    zooms = fmapnii.header.get_zooms()
+
+    # Calculate hi-res i
+    ijk = np.where(data < np.inf)
+    xyz = np.array(ijk).T * np.array(zooms)[np.newaxis, :3]
+
+    # Calculate control points
+    xyz_max = xyz.max(axis=0)
+    knot_dims = np.ceil(xyz_max / knot_space) + 2
+    bspl_grid = np.zeros(tuple(knot_dims))
+    bspl_ijk = np.where(bspl_grid == 0)
+    bspl_xyz = np.array(bspl_ijk).T * knot_space[np.newaxis, ...]
+    bspl_max = bspl_xyz.max(axis=0)
+    bspl_xyz -= 0.5 * (bspl_max - xyz_max)[np.newaxis, ...]
+
+    points_ijk = ijk
+    points_xyz = xyz
+
+    # Mask if provided
+    if masknii is not None:
+        if isinstance(masknii, (str, bytes)):
+            masknii = nb.load(masknii)
+        data[masknii.get_data() <= 0] = 0
+        points_ijk = np.where(masknii.get_data() > 0)
+        points_xyz = np.array(points_ijk).T * np.array(zooms)[np.newaxis, :3]
+
+
+    print('[%s] Evaluating tensor-product cubic-bspline on %d points' % (dt.now(), len(points_xyz)))
+    # Calculate design matrix
+    X = tbspl_eval(points_xyz, bspl_xyz, knot_space)
+    print('[%s] Finished, bspline grid has %d control points' % (dt.now(), len(bspl_xyz)))
+    Y = data[points_ijk]
+
+
+    # Fit coefficients
+    print('[%s] Starting least-squares fitting' % dt.now())
+    # coeff = (pinv2(X.T.dot(X)).dot(X.T)).dot(Y) # manual way (seems equally slow)
+    coeff = np.linalg.lstsq(X, Y)[0]
+    print('[%s] Finished least-squares fitting' % dt.now())
+    bspl_grid[bspl_ijk] = coeff
+    aff = np.eye(4)
+    aff[:3, :3] = aff[:3, :3] * knot_space[..., np.newaxis]
+    coeffnii = nb.Nifti1Image(bspl_grid, aff, None)
+
+    # Calculate hi-res design matrix:
+    # print('[%s] Evaluating tensor-product cubic-bspline on %d points' % (dt.now(), len(xyz)))
+    # Xinterp = tbspl_eval(xyz, bspl_xyz, knot_space)
+    # print('[%s] Finished, start interpolation' % dt.now())
+
+    # And interpolate
+    newdata = np.zeros_like(data)
+    newdata[points_ijk] = X.dot(coeff)
+    newnii = nb.Nifti1Image(newdata, fmapnii.affine, fmapnii.header)
+
+    return newnii, coeffnii
+
+def tbspl_eval(points, knots, zooms):
+    from fmriprep.utils.maths import bspl
+    points = np.array(points)
+    knots = np.array(knots)
+    vbspl = np.vectorize(bspl)
+
+    coeffs = []
+    ushape = (knots.shape[0], 3)
+    for p in points:
+        u_vec = (knots - p[np.newaxis, ...]) / zooms[np.newaxis, ...]
+        c = vbspl(u_vec.reshape(-1)).reshape(ushape).prod(axis=1)
+        coeffs.append(c)
+
+    return np.array(coeffs)
