@@ -6,7 +6,7 @@ __version__ = get_versions()['version']
 del get_versions
 
 __packagename__ = 'fmriprep'
-__copyright__ = 'Copyright 2020, Center for Reproducible Neuroscience, Stanford University'
+__copyright__ = 'Copyright 2020, The NiPreps Developers'
 __credits__ = ('Contributors: please check the ``.zenodo.json`` file at the top-level folder'
                'of the repository')
 __url__ = 'https://github.com/nipreps/fmriprep'
